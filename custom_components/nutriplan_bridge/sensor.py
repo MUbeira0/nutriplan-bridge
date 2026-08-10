@@ -122,6 +122,12 @@ def _first_present(data: Any, keys: tuple[str, ...]) -> Any:
 def _parse_datetime(value: Any) -> datetime | None:
     if not value:
         return None
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        # createdTimestamp arrives as a numeric string (e.g. "1770753900"),
+        # not a real number - without this it fell through to the ISO-string
+        # branch below, which parse_datetime()/parse_date() can't parse,
+        # silently producing "unknown" instead of a date.
+        value = float(value)
     if isinstance(value, (int, float)):
         try:
             return dt_util.utc_from_timestamp(value)
@@ -363,17 +369,40 @@ class DietoProNextAppointmentSensor(DietoProEntity):
 
 
 def _clean_seguimiento(item: dict) -> dict:
+    """Field names confirmed against a real 19-entry history. Two of the
+    fields the decompiled transformSeguimientos() implied ("pesoMasaMagra",
+    "pesoAgua") never actually appeared in that real data - the account
+    tracks "porcentajeAgua" (a %) instead, and lean mass isn't sent at all.
+    Both are derived here from peso/pesoGrasa/porcentajeAgua when possible,
+    since the API already gives us everything needed to compute them; if the
+    account ever DOES send them directly, the direct value wins.
+    """
+    peso = item.get("peso")
+    peso_grasa = item.get("pesoGrasa")
+    porcentaje_agua = item.get("porcentajeAgua")
+
+    peso_masa_magra = item.get("pesoMasaMagra")
+    if peso_masa_magra is None and isinstance(peso, (int, float)) and isinstance(peso_grasa, (int, float)):
+        peso_masa_magra = round(peso - peso_grasa, 2)
+
+    peso_agua = item.get("pesoAgua")
+    if peso_agua is None and isinstance(peso, (int, float)) and isinstance(porcentaje_agua, (int, float)):
+        peso_agua = round(peso * porcentaje_agua / 100, 2)
+
     return {
+        "id": item.get("id"),
         "fecha": _parse_datetime(item.get("createdTimestamp")),
-        "peso": item.get("peso"),
+        "peso": peso,
         "imc": item.get("imc"),
-        "peso_grasa": item.get("pesoGrasa"),
+        "peso_grasa": peso_grasa,
         "porcentaje_grasa": item.get("porcentajeGrasa"),
-        "peso_masa_magra": item.get("pesoMasaMagra"),
-        "peso_agua": item.get("pesoAgua"),
+        "porcentaje_agua": porcentaje_agua,
+        "peso_masa_magra": peso_masa_magra,
+        "peso_agua": peso_agua,
         "perimetro_cintura": item.get("perimetroCintura"),
         "perimetro_cintura_umbilical": item.get("perimetroCinturaUmbilical"),
         "perimetro_cadera": item.get("perimetroCadera"),
+        "observaciones": item.get("observaciones"),
     }
 
 
@@ -415,14 +444,18 @@ class DietoProSeguimientosSensor(DietoProEntity):
             "ultimo_imc": latest.get("imc"),
             "ultimo_peso_grasa": latest.get("peso_grasa"),
             "ultimo_porcentaje_grasa": latest.get("porcentaje_grasa"),
+            "ultimo_porcentaje_agua": latest.get("porcentaje_agua"),
             "ultimo_peso_masa_magra": latest.get("peso_masa_magra"),
             "ultimo_peso_agua": latest.get("peso_agua"),
             "ultimo_perimetro_cintura": latest.get("perimetro_cintura"),
             "ultimo_perimetro_cintura_umbilical": latest.get("perimetro_cintura_umbilical"),
             "ultimo_perimetro_cadera": latest.get("perimetro_cadera"),
+            "ultimas_observaciones": latest.get("observaciones"),
             "fecha_ultimo": latest.get("fecha"),
             "delta_peso": _delta(latest.get("peso"), previous.get("peso")),
             "delta_imc": _delta(latest.get("imc"), previous.get("imc")),
+            "delta_peso_grasa": _delta(latest.get("peso_grasa"), previous.get("peso_grasa")),
+            "delta_porcentaje_grasa": _delta(latest.get("porcentaje_grasa"), previous.get("porcentaje_grasa")),
             "historial": historial,
             "raw": self._seguimientos(),
         }

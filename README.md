@@ -51,7 +51,11 @@ el total del día (suma de todos los platos). La tarjeta lo muestra
 desplegable con receta, alérgenos, calorías e ingredientes por cada plato.
 
 El sensor `seguimientos` incluye además un `historial` completo (no solo el
-último registro) y `delta_peso`/`delta_imc` respecto a la medición anterior.
+último registro) y `delta_peso`/`delta_imc`/`delta_peso_grasa`/`delta_porcentaje_grasa`
+respecto a la medición anterior. El campo real de agua corporal es
+`porcentajeAgua` (no `pesoAgua` como sugería el código decompilado); cuando
+la cuenta no manda directamente `pesoAgua`/`pesoMasaMagra`, se calculan
+(`peso_agua = peso * porcentajeAgua / 100`, `peso_masa_magra = peso - peso_grasa`).
 
 **Único punto sin confirmar al 100%:** el nombre exacto del campo de fecha
 *dentro* del objeto `cita` (no había forma de verlo sin una respuesta real
