@@ -6,7 +6,7 @@ were extracted by decompiling the app's own compiled bundle
 with hermes-dec, and cross-checked live against https://dietopro.com (route
 existence + allowed HTTP verb only - no real account was used or required).
 
-Confirmed from the decompiled RTK Query API slice:
+Confirmed from the decompiled RTK Query API slice (+ live route/verb checks):
 - POST /api/login_check            body: FormData(_username, _password)
 - GET  /api/paciente/plans          -> JSON array of plan summaries
 - GET  /api/paciente/plan           -> current plan detail (no id = latest)
@@ -14,10 +14,20 @@ Confirmed from the decompiled RTK Query API slice:
 - GET  /api/paciente/cita           -> {"cita": {...} | null}
 - GET  /api/paciente/seguimientos   -> JSON array of measurements
 - GET  /api/paciente/dietista       -> assigned dietitian object
+- GET  /api/paciente/current-user   -> the patient's own profile
+- GET  /api/paciente/eni            -> initial nutrition survey status
+- GET  /api/paciente/rating         -> ratings the patient has given
+- GET  /api/paciente/charla         -> "charlas" (consultation notes/calls)
+- GET  /api/paciente/chat/unread    -> unread chat message count
+- GET  /api/paciente/chat/messages  -> chat message history
+- PUT  /api/paciente/chat/reset-unread     -> marks the chat as read
+- PUT  /api/paciente/superplato/{id}/rating -> body {"rating": n}, rate a dish
 - POST /api/paciente/token/refresh  -> route confirmed to exist (POST-only);
   request/response body assumed to follow gesdinet/jwt-refresh-token-bundle
   defaults since no authenticated session was available to confirm it. If it
   ever stops working the client transparently falls back to a full re-login.
+- "/api/paciente/pagos" was guessed from the useGetPagosQuery hook name but
+  does not exist (verified live: 404), so payments are NOT implemented.
 
 The backend (Symfony/PHP) serializes JSON in snake_case; the app applies a
 recursive camelize() to every response before using it. This client does the
@@ -163,3 +173,37 @@ class DietoProApiClient:
 
     async def async_get_dietista(self) -> Any:
         return await self._async_request("GET", "/api/paciente/dietista")
+
+    async def async_get_current_user(self) -> Any:
+        """The patient's own profile."""
+        return await self._async_request("GET", "/api/paciente/current-user")
+
+    async def async_get_eni(self) -> Any:
+        """Status of the initial nutrition survey (onboarding wizard)."""
+        return await self._async_request("GET", "/api/paciente/eni")
+
+    async def async_get_ratings(self) -> Any:
+        """Ratings the patient has given to dishes."""
+        return await self._async_request("GET", "/api/paciente/rating")
+
+    async def async_get_charlas(self) -> Any:
+        """Consultation notes/calls with the dietista."""
+        return await self._async_request("GET", "/api/paciente/charla")
+
+    async def async_get_chat_unread(self) -> Any:
+        return await self._async_request("GET", "/api/paciente/chat/unread")
+
+    async def async_get_chat_messages(self) -> Any:
+        return await self._async_request("GET", "/api/paciente/chat/messages")
+
+    async def async_mark_chat_read(self) -> Any:
+        return await self._async_request("PUT", "/api/paciente/chat/reset-unread")
+
+    async def async_rate_dish(self, super_plato_id: Any, rating: float) -> Any:
+        """Rate a dish (1-5). super_plato_id is the "id" exposed on each
+        plato in the comidas_hoy sensor's "comidas" attribute."""
+        return await self._async_request(
+            "PUT",
+            f"/api/paciente/superplato/{super_plato_id}/rating",
+            json={"rating": rating},
+        )

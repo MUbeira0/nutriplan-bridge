@@ -23,6 +23,17 @@ cuenta) para confirmar qué rutas existen y qué verbo aceptan.
 - `GET /api/paciente/cita` — `{"cita": {...} | null}`
 - `GET /api/paciente/seguimientos` — lista con `peso`, `imc`, `pesoGrasa`, `porcentajeGrasa`, `pesoMasaMagra`, `pesoAgua`, `perimetroCintura`, `perimetroCinturaUmbilical`, `perimetroCadera`, `createdTimestamp`
 - `GET /api/paciente/dietista`
+- `GET /api/paciente/current-user` — perfil del propio paciente
+- `GET /api/paciente/eni` — estado de la encuesta nutricional inicial
+- `GET /api/paciente/rating` — valoraciones que el paciente ha dado
+- `GET /api/paciente/charla` — charlas/consultas con el dietista
+- `GET /api/paciente/chat/unread` y `/chat/messages` — chat con el dietista
+- `PUT /api/paciente/chat/reset-unread` — marcar el chat como leído
+- `PUT /api/paciente/superplato/{id}/rating` — valorar un plato
+
+`api/paciente/pagos` se intuía por el nombre del hook `useGetPagosQuery` pero
+**no existe** (probado en vivo: 404), así que no hay nada de pagos en la
+integración.
 
 Cada franja de una `dieta` (p. ej. `dieta.comida`) trae a su vez `hora` y una
 lista `subingestas` (una comida puede tener más de un plato, p. ej. desayuno
@@ -54,10 +65,18 @@ hace falta.
 4. Introduce tu email y contraseña de la app (viajan directamente al backend
    real, nunca pasan por ningún otro sitio).
 
-Esto crea 5 entidades bajo un dispositivo "Nutriplan Bridge":
+Esto crea 10 entidades bajo un dispositivo "Nutriplan Bridge":
 `sensor.nutriplan_bridge_plan_actual`, `sensor.nutriplan_bridge_comidas_hoy`,
 `sensor.nutriplan_bridge_proxima_cita`, `sensor.nutriplan_bridge_seguimientos`,
-`sensor.nutriplan_bridge_dietista`.
+`sensor.nutriplan_bridge_dietista`, `sensor.nutriplan_bridge_mensajes_sin_leer`,
+`sensor.nutriplan_bridge_mi_perfil`, `sensor.nutriplan_bridge_estado_eni`,
+`sensor.nutriplan_bridge_valoraciones`, `sensor.nutriplan_bridge_charlas`.
+
+Y dos acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+- `nutriplan_bridge.marcar_chat_leido`
+- `nutriplan_bridge.valorar_plato` (necesita el `super_plato_id` que trae
+  cada plato en el atributo `comidas` del sensor `comidas_hoy`, y una
+  puntuación de 1 a 5)
 
 ## Tarjeta
 

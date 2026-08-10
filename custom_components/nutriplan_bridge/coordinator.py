@@ -61,6 +61,12 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             ("cita", self.client.async_get_cita()),
             ("seguimientos", self.client.async_get_seguimientos()),
             ("dietista", self.client.async_get_dietista()),
+            ("current_user", self.client.async_get_current_user()),
+            ("eni", self.client.async_get_eni()),
+            ("ratings", self.client.async_get_ratings()),
+            ("charlas", self.client.async_get_charlas()),
+            ("chat_unread", self.client.async_get_chat_unread()),
+            ("chat_messages", self.client.async_get_chat_messages()),
         ):
             try:
                 results[key] = await coro

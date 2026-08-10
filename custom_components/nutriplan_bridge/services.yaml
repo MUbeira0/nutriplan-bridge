@@ -1,0 +1,47 @@
+marcar_chat_leido:
+  name: Marcar chat como leído
+  description: Marca como leídos todos los mensajes del chat con el dietista.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+
+valorar_plato:
+  name: Valorar plato
+  description: >-
+    Envía una valoración (1-5) para un plato. Usa el "super_plato_id" que
+    aparece en el atributo "comidas" del sensor "Comidas de hoy".
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    super_plato_id:
+      name: ID del plato
+      description: >-
+        El "super_plato_id" del plato a valorar (ver atributo "comidas" del
+        sensor comidas_hoy).
+      required: true
+      selector:
+        text:
+    rating:
+      name: Valoración
+      description: Puntuación de 1 a 5.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 0.5
+          mode: slider

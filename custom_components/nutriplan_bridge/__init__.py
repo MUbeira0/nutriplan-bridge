@@ -5,12 +5,15 @@ import json
 import logging
 from pathlib import Path
 
+import voluptuous as vol
+
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
@@ -21,7 +24,23 @@ _LOGGER = logging.getLogger(__name__)
 
 CARD_URL_PATH = "/nutriplan_bridge_files/nutriplan-bridge-card.js"
 
+SERVICE_MARK_CHAT_READ = "marcar_chat_leido"
+SERVICE_RATE_DISH = "valorar_plato"
+
+_ENTRY_SCHEMA = {vol.Optional("config_entry_id"): cv.string}
+
+MARK_CHAT_READ_SCHEMA = vol.Schema(_ENTRY_SCHEMA)
+
+RATE_DISH_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("super_plato_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("rating"): vol.All(vol.Coerce(float), vol.Range(min=1, max=5)),
+    }
+)
+
 _card_registered = False
+_services_registered = False
 
 
 def _integration_version() -> str:
@@ -36,9 +55,45 @@ def _integration_version() -> str:
         return "0"
 
 
+def _resolve_coordinator(hass: HomeAssistant, call: ServiceCall) -> DietoProDataUpdateCoordinator:
+    coordinators: dict[str, DietoProDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
+    entry_id = call.data.get("config_entry_id")
+    if entry_id:
+        coordinator = coordinators.get(entry_id)
+        if coordinator is None:
+            raise HomeAssistantError(f"Unknown config_entry_id: {entry_id}")
+        return coordinator
+    if len(coordinators) == 1:
+        return next(iter(coordinators.values()))
+    if not coordinators:
+        raise HomeAssistantError("No Nutriplan Bridge account is configured")
+    raise HomeAssistantError(
+        "Multiple Nutriplan Bridge accounts are configured; pass config_entry_id to pick one"
+    )
+
+
+async def _async_handle_mark_chat_read(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        await coordinator.client.async_mark_chat_read()
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise HomeAssistantError(str(err)) from err
+    await coordinator.async_request_refresh()
+
+
+async def _async_handle_rate_dish(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        await coordinator.client.async_rate_dish(call.data["super_plato_id"], call.data["rating"])
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise HomeAssistantError(str(err)) from err
+    await coordinator.async_request_refresh()
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the bundled Lovelace card once, regardless of how many accounts are configured."""
-    global _card_registered
+    """Register the bundled Lovelace card and the two write services once,
+    regardless of how many accounts are configured."""
+    global _card_registered, _services_registered
     if not _card_registered:
         www_dir = Path(__file__).parent / "www"
         await hass.http.async_register_static_paths(
@@ -46,6 +101,19 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         )
         add_extra_js_url(hass, f"{CARD_URL_PATH}?v={_integration_version()}")
         _card_registered = True
+
+    if not _services_registered:
+
+        async def _mark_chat_read(call: ServiceCall) -> None:
+            await _async_handle_mark_chat_read(hass, call)
+
+        async def _rate_dish(call: ServiceCall) -> None:
+            await _async_handle_rate_dish(hass, call)
+
+        hass.services.async_register(DOMAIN, SERVICE_MARK_CHAT_READ, _mark_chat_read, schema=MARK_CHAT_READ_SCHEMA)
+        hass.services.async_register(DOMAIN, SERVICE_RATE_DISH, _rate_dish, schema=RATE_DISH_SCHEMA)
+        _services_registered = True
+
     return True
 
 

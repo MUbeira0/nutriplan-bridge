@@ -118,6 +118,7 @@ def _plato_detail(plato: Any) -> dict:
     image_path = super_plato.get("imagePath") or super_plato.get("thumbnail")
     energia = plato.get("energia")
     return {
+        "super_plato_id": super_plato.get("id"),
         "nombre": super_plato.get("nombre"),
         "receta": super_plato.get("receta"),
         "comensales": super_plato.get("comensales"),
@@ -161,6 +162,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DietoProNextAppointmentSensor(coordinator, entry),
             DietoProSeguimientosSensor(coordinator, entry),
             DietoProDietistaSensor(coordinator, entry),
+            DietoProChatSensor(coordinator, entry),
+            DietoProPerfilSensor(coordinator, entry),
+            DietoProEniSensor(coordinator, entry),
+            DietoProValoracionesSensor(coordinator, entry),
+            DietoProCharlasSensor(coordinator, entry),
         ]
     )
 
@@ -381,3 +387,138 @@ class DietoProDietistaSensor(DietoProEntity):
             },
             "raw": dietista,
         }
+
+
+class DietoProChatSensor(DietoProEntity):
+    """Unread chat messages with the dietista - GET /api/paciente/chat/unread + /chat/messages."""
+
+    _attr_icon = "mdi:chat-processing"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "mensajes_sin_leer", "Mensajes sin leer")
+
+    def _unread_count(self) -> int:
+        data = (self.coordinator.data or {}).get("chat_unread")
+        if isinstance(data, (int, float)):
+            return int(data)
+        if isinstance(data, dict):
+            value = _first_present(data, ("unread", "count", "total", "unreadCount"))
+            if isinstance(value, (int, float)):
+                return int(value)
+        return 0
+
+    @property
+    def native_value(self) -> int:
+        return self._unread_count()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        messages = (self.coordinator.data or {}).get("chat_messages")
+        return {"mensajes": messages, "raw_unread": (self.coordinator.data or {}).get("chat_unread")}
+
+
+class DietoProPerfilSensor(DietoProEntity):
+    """The patient's own profile - GET /api/paciente/current-user."""
+
+    _attr_icon = "mdi:account"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "mi_perfil", "Mi perfil")
+
+    def _perfil(self) -> dict | None:
+        data = (self.coordinator.data or {}).get("current_user")
+        return data if isinstance(data, dict) else None
+
+    @property
+    def native_value(self) -> str | None:
+        perfil = self._perfil()
+        if not perfil:
+            return None
+        nombre = " ".join(
+            part for part in (perfil.get("firstName"), perfil.get("familyName")) if part
+        ).strip()
+        return nombre or _first_present(perfil, ("nombre", "name")) or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        perfil = self._perfil() or {}
+        return {
+            "email": perfil.get("email"),
+            "telefono": perfil.get("mobilePhone"),
+            "raw": perfil,
+        }
+
+
+class DietoProEniSensor(DietoProEntity):
+    """Initial nutrition survey (onboarding wizard) status - GET /api/paciente/eni."""
+
+    _attr_icon = "mdi:clipboard-text-outline"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "estado_eni", "Encuesta inicial")
+
+    def _eni(self) -> dict | None:
+        data = (self.coordinator.data or {}).get("eni")
+        return data if isinstance(data, dict) else None
+
+    @property
+    def native_value(self) -> str:
+        eni = self._eni()
+        if eni is None:
+            return "sin_iniciar"
+        completed = _first_present(eni, ("completed", "finished", "isCompleted", "isFinished"))
+        if isinstance(completed, bool):
+            return "completada" if completed else "en_progreso"
+        return "en_progreso"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"raw": self._eni()}
+
+
+class DietoProValoracionesSensor(DietoProEntity):
+    """Ratings the patient has given to dishes - GET /api/paciente/rating."""
+
+    _attr_icon = "mdi:star"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "valoraciones", "Valoraciones")
+
+    def _ratings(self) -> list:
+        data = (self.coordinator.data or {}).get("ratings")
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            inner = _first_present(data, ("ratings", "items", "data"))
+            if isinstance(inner, list):
+                return inner
+        return []
+
+    @property
+    def native_value(self) -> int:
+        return len(self._ratings())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"raw": self._ratings()}
+
+
+class DietoProCharlasSensor(DietoProEntity):
+    """Consultation notes/calls with the dietista - GET /api/paciente/charla."""
+
+    _attr_icon = "mdi:phone-message"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "charlas", "Charlas")
+
+    def _charlas(self) -> Any:
+        return (self.coordinator.data or {}).get("charlas")
+
+    @property
+    def native_value(self) -> int:
+        charlas = self._charlas()
+        return len(charlas) if isinstance(charlas, list) else (1 if charlas else 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"raw": self._charlas()}
