@@ -1,6 +1,7 @@
 """The Nutriplan Bridge integration."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -19,9 +20,20 @@ from .coordinator import DietoProDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 CARD_URL_PATH = "/nutriplan_bridge_files/nutriplan-bridge-card.js"
-CARD_VERSION = "1"
 
 _card_registered = False
+
+
+def _integration_version() -> str:
+    """Read manifest.json's version so the card URL's cache-buster changes
+    automatically on every release - it used to be a hardcoded "1" that
+    never changed across releases, so browsers kept serving a stale cached
+    copy of the card even after updating through HACS."""
+    manifest_path = Path(__file__).parent / "manifest.json"
+    try:
+        return json.loads(manifest_path.read_text(encoding="utf-8"))["version"]
+    except (OSError, KeyError, ValueError):
+        return "0"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -32,7 +44,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False)]
         )
-        add_extra_js_url(hass, f"{CARD_URL_PATH}?v={CARD_VERSION}")
+        add_extra_js_url(hass, f"{CARD_URL_PATH}?v={_integration_version()}")
         _card_registered = True
     return True
 

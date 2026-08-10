@@ -5,7 +5,9 @@
  *
  * Zero-config by default: it looks for entities created by this integration
  * (unique object_id suffixes "plan_actual", "comidas_hoy", "proxima_cita",
- * "seguimientos", "dietista"). You can also point it at explicit entity ids:
+ * "seguimientos", "dietista"). Has a visual (GUI) editor - click "Edit" on
+ * the card - to override entities explicitly if you run more than one
+ * account. Equivalent YAML:
  *
  * type: custom:nutriplan-bridge-card
  * plan_entity: sensor.nutriplan_bridge_plan_actual
@@ -44,6 +46,14 @@ const MEAL_ICONS = {
   recena2: "mdi:moon-waning-crescent",
 };
 
+const ENTITY_FIELDS = [
+  { key: "plan_entity", suffix: "_plan_actual", label: "Plan actual" },
+  { key: "meals_entity", suffix: "_comidas_hoy", label: "Comidas de hoy" },
+  { key: "appointment_entity", suffix: "_proxima_cita", label: "Próxima cita" },
+  { key: "tracking_entity", suffix: "_seguimientos", label: "Seguimientos" },
+  { key: "dietista_entity", suffix: "_dietista", label: "Dietista" },
+];
+
 function findEntity(hass, explicitId, suffix) {
   if (explicitId && hass.states[explicitId]) return hass.states[explicitId];
   const match = Object.keys(hass.states).find(
@@ -77,16 +87,22 @@ class NutriplanBridgeCard extends HTMLElement {
   constructor() {
     super();
     this._expanded = new Set();
+    // Attach the shadow root immediately: Lovelace can call setConfig()
+    // (e.g. for the "add card" preview) before this element is connected
+    // to the document, so connectedCallback is too late and leaves
+    // this.shadowRoot null, throwing and surfacing as "Error de
+    // configuración" with no useful detail.
+    this.attachShadow({ mode: "open" });
   }
 
   setConfig(config) {
     this._config = config || {};
-    this._render();
+    this._safeRender();
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    this._safeRender();
   }
 
   getCardSize() {
@@ -97,9 +113,24 @@ class NutriplanBridgeCard extends HTMLElement {
     return {};
   }
 
-  connectedCallback() {
-    if (!this.shadowRoot) {
-      this.attachShadow({ mode: "open" });
+  static getConfigElement() {
+    return document.createElement("nutriplan-bridge-card-editor");
+  }
+
+  _safeRender() {
+    try {
+      this._render();
+    } catch (err) {
+      // Never let a render bug surface as HA's generic "Error de
+      // configuración" - show what actually broke, inside our own card.
+      this._ensureDom();
+      const card = this.shadowRoot.querySelector("ha-card");
+      if (card) {
+        card.innerHTML = `<div class="unavailable">Nutriplan Bridge: error al renderizar la tarjeta.<br>${escapeHtml(
+          err.message || String(err)
+        )}</div>`;
+      }
+      console.error("nutriplan-bridge-card render error", err);
     }
   }
 
@@ -167,12 +198,12 @@ class NutriplanBridgeCard extends HTMLElement {
     } else {
       this._expanded.add(franja);
     }
-    this._render();
+    this._safeRender();
   }
 
   _renderPlato(plato) {
     const img = plato.imagen
-      ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" />`
+      ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" onerror="this.style.display='none'" />`
       : "";
     const metaParts = [];
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
@@ -188,7 +219,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
     const receta = plato.receta
       ? `<div class="meal-receta">${escapeHtml(plato.receta)}</div>`
-      : '<div class="empty">Sin receta detallada (plato simple)</div>';
+      : '<div class="empty">No requiere preparación</div>';
 
     const ingredientes =
       plato.ingredientes && plato.ingredientes.length
@@ -245,7 +276,7 @@ class NutriplanBridgeCard extends HTMLElement {
     if (!this._hass) return;
     this._ensureDom();
     const hass = this._hass;
-    const cfg = this._config;
+    const cfg = this._config || {};
 
     const planEntity = findEntity(hass, cfg.plan_entity, "_plan_actual");
     const mealsEntity = findEntity(hass, cfg.meals_entity, "_comidas_hoy");
@@ -256,7 +287,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const card = this.shadowRoot.querySelector("ha-card");
     if (!planEntity && !mealsEntity && !apptEntity && !trackingEntity) {
       card.innerHTML =
-        '<div class="unavailable">No se han encontrado entidades de Nutriplan Bridge. Configura la integración primero.</div>';
+        '<div class="unavailable">No se han encontrado entidades de Nutriplan Bridge.<br>Configura primero la integración en Ajustes → Dispositivos y servicios, o indica las entidades manualmente editando esta tarjeta.</div>';
       return;
     }
 
@@ -266,7 +297,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const planName =
       planEntity && planEntity.state !== "unknown" ? planEntity.state : "Sin plan activo";
 
-    const meals = (mealsEntity && mealsEntity.attributes.comidas) || [];
+    const meals = (mealsEntity && mealsEntity.attributes && mealsEntity.attributes.comidas) || [];
     const mealsHtml = meals.length
       ? `<div class="meals">${meals.map((m) => this._renderMeal(m)).join("")}</div>`
       : '<div class="empty">Sin comidas programadas para hoy</div>';
@@ -275,7 +306,9 @@ class NutriplanBridgeCard extends HTMLElement {
     if (apptEntity && apptEntity.state && apptEntity.state !== "unknown") {
       const label =
         apptEntity.state === "programada" ? "Cita programada" : formatDate(apptEntity.state);
-      apptHtml = `<div class="appointment"><ha-icon icon="mdi:calendar-clock"></ha-icon><span>${label}</span></div>`;
+      apptHtml = `<div class="appointment"><ha-icon icon="mdi:calendar-clock"></ha-icon><span>${escapeHtml(
+        label
+      )}</span></div>`;
     }
 
     let metricsHtml = "";
@@ -290,7 +323,7 @@ class NutriplanBridgeCard extends HTMLElement {
         metricsHtml = `<div class="metrics">${metrics
           .map(
             ([key, label]) =>
-              `<div class="metric"><span class="value">${a[key]}</span><span class="label">${label}</span></div>`
+              `<div class="metric"><span class="value">${escapeHtml(a[key])}</span><span class="label">${label}</span></div>`
           )
           .join("")}</div>`;
       } else {
@@ -334,6 +367,78 @@ class NutriplanBridgeCard extends HTMLElement {
 }
 
 customElements.define("nutriplan-bridge-card", NutriplanBridgeCard);
+
+/* Visual (GUI) editor: shown when the user clicks "Edit" on the card in the
+ * dashboard. All fields are optional - entities are auto-detected - this is
+ * only useful if you run more than one Nutriplan Bridge account. */
+class NutriplanBridgeCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._forms) {
+      this._forms.forEach((form) => (form.hass = hass));
+    }
+  }
+
+  connectedCallback() {
+    this._render();
+  }
+
+  _valueChanged(key, value) {
+    const next = { ...this._config };
+    if (value) {
+      next[key] = value;
+    } else {
+      delete next[key];
+    }
+    this._config = next;
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: next }, bubbles: true, composed: true }));
+  }
+
+  _render() {
+    if (!this.isConnected) return;
+    this.innerHTML = `
+      <style>
+        .info { padding: 8px 2px 14px 2px; color: var(--secondary-text-color); font-size: 0.9em; }
+        .field { margin-bottom: 8px; }
+        .field label { display: block; font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 2px; }
+      </style>
+      <div class="info">
+        Las entidades se detectan automáticamente (no hace falta rellenar nada).
+        Usa esto solo si tienes varias cuentas de Nutriplan Bridge y quieres
+        forzar qué sensores usa esta tarjeta en concreto.
+      </div>
+      <div class="fields"></div>
+    `;
+    const container = this.querySelector(".fields");
+    this._forms = [];
+    ENTITY_FIELDS.forEach(({ key, label }) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "field";
+      const labelEl = document.createElement("label");
+      labelEl.textContent = label;
+      wrapper.appendChild(labelEl);
+
+      const picker = document.createElement("ha-entity-picker");
+      picker.hass = this._hass;
+      picker.value = this._config[key] || "";
+      picker.includeDomains = ["sensor"];
+      picker.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this._valueChanged(key, ev.detail.value);
+      });
+      wrapper.appendChild(picker);
+      container.appendChild(wrapper);
+      this._forms.push(picker);
+    });
+  }
+}
+
+customElements.define("nutriplan-bridge-card-editor", NutriplanBridgeCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

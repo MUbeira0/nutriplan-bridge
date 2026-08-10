@@ -61,7 +61,9 @@ Esto crea 5 entidades bajo un dispositivo "Nutriplan Bridge":
 
 ## Tarjeta
 
-Añade una tarjeta manual en cualquier dashboard:
+Desde el editor de dashboards: "Añadir tarjeta" → busca "Nutriplan Bridge" →
+se añade con un clic (tiene editor visual; las entidades se autodetectan, no
+hace falta rellenar nada salvo que tengas varias cuentas). O en YAML:
 
 ```yaml
 type: custom:nutriplan-bridge-card
