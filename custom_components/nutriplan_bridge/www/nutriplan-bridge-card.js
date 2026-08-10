@@ -141,6 +141,7 @@ class NutriplanBridgeCard extends HTMLElement {
         ha-card { padding: 16px; }
         .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
         .header ha-icon { color: var(--primary-color); --mdc-icon-size: 28px; }
+        .header .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
         .header .title { font-size: 1.2em; font-weight: 500; color: var(--primary-text-color); }
         .header .subtitle { font-size: 0.9em; color: var(--secondary-text-color); }
         .section { margin-top: 14px; }
@@ -244,11 +245,11 @@ class NutriplanBridgeCard extends HTMLElement {
     `;
   }
 
-  _renderMeal(meal) {
+  _renderMeal(meal, labelsOverride) {
     const franja = meal.franja;
     const isOpen = this._expanded.has(franja);
     const icon = MEAL_ICONS[franja] || "mdi:food";
-    const label = MEAL_LABELS[franja] || franja;
+    const label = (labelsOverride && labelsOverride[franja]) || MEAL_LABELS[franja] || franja;
     const platos = meal.platos || [];
     const summary = platos.length
       ? platos.map((p) => p.nombre || "Sin especificar").join(" + ")
@@ -291,15 +292,18 @@ class NutriplanBridgeCard extends HTMLElement {
       return;
     }
 
+    const dietistaAttrs = (dietistaEntity && dietistaEntity.attributes) || {};
     const dietistaName =
       dietistaEntity && dietistaEntity.state !== "unknown" ? dietistaEntity.state : "Nutriplan Bridge";
+    const dietistaAvatar = dietistaAttrs.avatar;
+    const mealLabels = dietistaAttrs.nombres_franjas || {};
 
     const planName =
       planEntity && planEntity.state !== "unknown" ? planEntity.state : "Sin plan activo";
 
     const meals = (mealsEntity && mealsEntity.attributes && mealsEntity.attributes.comidas) || [];
     const mealsHtml = meals.length
-      ? `<div class="meals">${meals.map((m) => this._renderMeal(m)).join("")}</div>`
+      ? `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels)).join("")}</div>`
       : '<div class="empty">Sin comidas programadas para hoy</div>';
 
     let apptHtml = '<div class="empty">Sin próxima cita</div>';
@@ -331,9 +335,13 @@ class NutriplanBridgeCard extends HTMLElement {
       }
     }
 
+    const avatarHtml = dietistaAvatar
+      ? `<img class="avatar" src="${escapeHtml(dietistaAvatar)}" alt="${escapeHtml(dietistaName)}" onerror="this.replaceWith(Object.assign(document.createElement('ha-icon'),{icon:'mdi:food-apple'}))" />`
+      : `<ha-icon icon="mdi:food-apple"></ha-icon>`;
+
     card.innerHTML = `
       <div class="header">
-        <ha-icon icon="mdi:food-apple"></ha-icon>
+        ${avatarHtml}
         <div>
           <div class="title">${escapeHtml(planName)}</div>
           <div class="subtitle">${escapeHtml(dietistaName)}</div>

@@ -335,6 +335,16 @@ class DietoProSeguimientosSensor(DietoProEntity):
 
 
 class DietoProDietistaSensor(DietoProEntity):
+    """The assigned dietitian/coach - GET /api/paciente/dietista.
+
+    Real field names (verified against a real response, not guessed):
+    firstName, familyName, email, mobilePhone, avatar (relative image path),
+    numColegiacion, and "nombreIngestas" - a per-account list of
+    {ingestaType, ingestaName} mapping each meal-slot key (e.g. "tentempie1")
+    to the human label this particular dietista uses for it (e.g. "Media
+    mañana"), which can differ between accounts/dietistas.
+    """
+
     _attr_icon = "mdi:account-heart"
 
     def __init__(self, coordinator, entry) -> None:
@@ -349,8 +359,25 @@ class DietoProDietistaSensor(DietoProEntity):
         dietista = self._dietista()
         if not dietista:
             return None
-        return _first_present(dietista, ("nombre", "nombreCompleto", "name")) or "Sin asignar"
+        nombre = " ".join(
+            part for part in (dietista.get("firstName"), dietista.get("familyName")) if part
+        ).strip()
+        return nombre or _first_present(dietista, ("nombre", "nombreCompleto", "name")) or "Sin asignar"
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"raw": self._dietista()}
+        dietista = self._dietista() or {}
+        avatar = dietista.get("avatar")
+        return {
+            "email": dietista.get("email"),
+            "telefono": dietista.get("mobilePhone"),
+            "num_colegiacion": dietista.get("numColegiacion"),
+            "chat_disponible": dietista.get("chatAvailable"),
+            "avatar": f"{BASE_URL}{avatar}" if avatar else None,
+            "nombres_franjas": {
+                item.get("ingestaType"): item.get("ingestaName")
+                for item in dietista.get("nombreIngestas") or []
+                if isinstance(item, dict)
+            },
+            "raw": dietista,
+        }
