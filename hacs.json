@@ -1,0 +1,5 @@
+{
+  "name": "Nutriplan Bridge",
+  "render_readme": true,
+  "homeassistant": "2024.7.0"
+}
