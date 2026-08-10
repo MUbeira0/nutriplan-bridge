@@ -340,6 +340,14 @@ class DietoProTodayMealsSensor(DietoProEntity):
         return len(self._meals())
 
     @property
+    def entity_picture(self) -> str | None:
+        for meal in self._meals():
+            for plato in meal.get("platos") or []:
+                if plato.get("imagen"):
+                    return plato["imagen"]
+        return None
+
+    @property
     def extra_state_attributes(self) -> dict:
         dieta = self._todays_dieta() or {}
         meals = self._meals()
@@ -503,6 +511,11 @@ class DietoProDietistaSensor(DietoProEntity):
         return nombre or _first_present(dietista, ("nombre", "nombreCompleto", "name")) or "Sin asignar"
 
     @property
+    def entity_picture(self) -> str | None:
+        avatar = (self._dietista() or {}).get("avatar")
+        return f"{BASE_URL}{avatar}" if avatar else None
+
+    @property
     def extra_state_attributes(self) -> dict:
         dietista = self._dietista() or {}
         avatar = dietista.get("avatar")
@@ -649,7 +662,15 @@ class DietoProValoracionesSensor(DietoProEntity):
 
 
 class DietoProCharlasSensor(DietoProEntity):
-    """Consultation notes/calls with the dietista - GET /api/paciente/charla."""
+    """Consultation talks with the dietista - GET /api/paciente/charla.
+
+    Partially confirmed from decompiled source (a "charlaPaciente"-style
+    wrapper with a nested "charla" object): "charla.titulo" is the talk's
+    title, and "fechaImparticion" (ISO date, parsed with Luxon in the app)
+    is its delivery date - seen as a sibling field on the wrapper, not
+    nested inside "charla" itself. Never confirmed against a real response,
+    so this stays defensive and always keeps "raw" available.
+    """
 
     _attr_icon = "mdi:phone-message"
 
@@ -659,11 +680,30 @@ class DietoProCharlasSensor(DietoProEntity):
     def _charlas(self) -> Any:
         return (self.coordinator.data or {}).get("charlas")
 
+    def _items(self) -> list[dict]:
+        data = self._charlas()
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            return [data]
+        return []
+
+    def _cleaned(self) -> list[dict]:
+        cleaned = []
+        for item in self._items():
+            charla = item.get("charla") if isinstance(item.get("charla"), dict) else {}
+            cleaned.append(
+                {
+                    "titulo": charla.get("titulo") or item.get("titulo"),
+                    "fecha": _parse_datetime(item.get("fechaImparticion")),
+                }
+            )
+        return cleaned
+
     @property
     def native_value(self) -> int:
-        charlas = self._charlas()
-        return len(charlas) if isinstance(charlas, list) else (1 if charlas else 0)
+        return len(self._items())
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"raw": self._charlas()}
+        return {"charlas": self._cleaned(), "raw": self._charlas()}
