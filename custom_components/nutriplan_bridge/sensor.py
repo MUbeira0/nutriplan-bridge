@@ -49,6 +49,58 @@ MEAL_SLOT_KEYS = (
 
 WEEKDAYS_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
 
+# Every one of these keys was present on a real "plato" object (confirmed
+# against a real API response, not guessed). Units follow the standard
+# Spanish food-composition-table convention (BEDCA-style: mg/mcg/g) - the
+# API itself never states units explicitly, so that part is a reasonable
+# but unconfirmed assumption; the raw values are always in "raw" too.
+NUTRIENT_KEY_MAP = {
+    "energia_kcal": "energia",
+    "proteinas_g": "proteinasTotales",
+    "grasas_g": "grasasTotales",
+    "grasas_saturadas_g": "ags",
+    "grasas_monoinsaturadas_g": "agmi",
+    "grasas_poliinsaturadas_g": "agpi",
+    "colesterol_mg": "colesterol",
+    "carbohidratos_g": "glucidosTotales",
+    "azucares_g": "azucares",
+    "azucares_anadidos_g": "azucaresAnadidos",
+    "fibra_g": "fibra",
+    "sodio_mg": "sodio",
+    "potasio_mg": "potasio",
+    "calcio_mg": "calcio",
+    "hierro_mg": "hierro",
+    "magnesio_mg": "magnesio",
+    "fosforo_mg": "fosforo",
+    "yodo_mcg": "iodo",
+    "vitamina_a_mcg": "vitA",
+    "vitamina_c_mg": "vitC",
+    "vitamina_d_mcg": "vitD",
+    "vitamina_e_mg": "vitE",
+    "vitamina_b1_mg": "vitB1",
+    "vitamina_b2_mg": "vitB2",
+    "vitamina_b6_mg": "vitB6",
+    "vitamina_b12_mcg": "vitB12",
+    "folato_mcg": "vitFolato",
+    "niacina_mg": "vitNiacina",
+}
+
+
+def _nutrients(plato: dict) -> dict:
+    return {out_key: plato.get(src_key) for out_key, src_key in NUTRIENT_KEY_MAP.items()}
+
+
+def _sum_nutrients(nutrient_dicts: list[dict]) -> dict:
+    totals: dict[str, float] = {key: 0.0 for key in NUTRIENT_KEY_MAP}
+    seen = False
+    for nutrients in nutrient_dicts:
+        for key in NUTRIENT_KEY_MAP:
+            value = nutrients.get(key)
+            if isinstance(value, (int, float)):
+                totals[key] += value
+                seen = True
+    return {key: round(value, 2) for key, value in totals.items()} if seen else {}
+
 # The "cita" object's own date field was never confirmed against a real
 # response (no test account available) - this is the only best-effort part left.
 CITA_DATE_KEYS = ("fecha", "fechaHora", "fechaCita", "datetime", "date", "inicio")
@@ -107,14 +159,21 @@ def _plato_detail(plato: Any) -> dict:
         if not isinstance(item, dict):
             continue
         alimento = item.get("alimento") if isinstance(item.get("alimento"), dict) else {}
+        grupo = alimento.get("grupoAlimento") if isinstance(alimento.get("grupoAlimento"), dict) else {}
+        super_grupo = (
+            alimento.get("superGrupoAlimento") if isinstance(alimento.get("superGrupoAlimento"), dict) else {}
+        )
         ingredientes.append(
             {
                 "nombre": alimento.get("nombre"),
                 "cantidad": item.get("cantidad"),
                 "medida_casera": item.get("medidaCasera"),
+                "grupo": grupo.get("nombre"),
+                "categoria": super_grupo.get("nombre"),
             }
         )
 
+    talla_plato = plato.get("tallaPlato") if isinstance(plato.get("tallaPlato"), dict) else {}
     image_path = super_plato.get("imagePath") or super_plato.get("thumbnail")
     energia = plato.get("energia")
     return {
@@ -125,9 +184,11 @@ def _plato_detail(plato: Any) -> dict:
         "duracion_min": super_plato.get("duracion"),
         "rating": super_plato.get("rating"),
         "calorias": round(energia) if isinstance(energia, (int, float)) else energia,
+        "talla": talla_plato.get("talla"),
         "alergenos": plato.get("alergenos") or [],
         "imagen": f"{BASE_URL}{image_path}" if image_path else None,
         "ingredientes": ingredientes,
+        "nutrientes": _nutrients(plato),
     }
 
 
@@ -265,11 +326,12 @@ class DietoProTodayMealsSensor(DietoProEntity):
     def extra_state_attributes(self) -> dict:
         dieta = self._todays_dieta() or {}
         meals = self._meals()
-        total_platos = sum(len(m.get("platos") or []) for m in meals)
+        all_platos = [p for m in meals for p in (m.get("platos") or [])]
         return {
             "horario": dieta.get("nombreHorario"),
             "franjas": [m["franja"] for m in meals],
-            "total_platos": total_platos,
+            "total_platos": len(all_platos),
+            "resumen_nutricional": _sum_nutrients([p.get("nutrientes") or {} for p in all_platos]),
             "comidas": meals,
             "raw": dieta,
         }
@@ -300,6 +362,27 @@ class DietoProNextAppointmentSensor(DietoProEntity):
         return {"raw": self._cita()}
 
 
+def _clean_seguimiento(item: dict) -> dict:
+    return {
+        "fecha": _parse_datetime(item.get("createdTimestamp")),
+        "peso": item.get("peso"),
+        "imc": item.get("imc"),
+        "peso_grasa": item.get("pesoGrasa"),
+        "porcentaje_grasa": item.get("porcentajeGrasa"),
+        "peso_masa_magra": item.get("pesoMasaMagra"),
+        "peso_agua": item.get("pesoAgua"),
+        "perimetro_cintura": item.get("perimetroCintura"),
+        "perimetro_cintura_umbilical": item.get("perimetroCinturaUmbilical"),
+        "perimetro_cadera": item.get("perimetroCadera"),
+    }
+
+
+def _delta(curr: Any, prev: Any) -> float | None:
+    if isinstance(curr, (int, float)) and isinstance(prev, (int, float)):
+        return round(curr - prev, 2)
+    return None
+
+
 class DietoProSeguimientosSensor(DietoProEntity):
     """Body-composition tracking entries (peso, imc, pesoGrasa, ...)."""
 
@@ -312,12 +395,10 @@ class DietoProSeguimientosSensor(DietoProEntity):
         data = (self.coordinator.data or {}).get("seguimientos")
         return data if isinstance(data, list) else []
 
-    def _latest(self) -> dict | None:
+    def _sorted_items(self) -> list[dict]:
         items = [s for s in self._seguimientos() if isinstance(s, dict) and s.get("createdTimestamp")]
-        if not items:
-            return None
-        items.sort(key=lambda s: float(s["createdTimestamp"]), reverse=True)
-        return items[0]
+        items.sort(key=lambda s: float(s["createdTimestamp"]))
+        return items
 
     @property
     def native_value(self) -> int:
@@ -325,17 +406,24 @@ class DietoProSeguimientosSensor(DietoProEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        latest = self._latest() or {}
+        items = self._sorted_items()
+        historial = [_clean_seguimiento(s) for s in items]
+        latest = historial[-1] if historial else {}
+        previous = historial[-2] if len(historial) >= 2 else {}
         return {
             "ultimo_peso": latest.get("peso"),
             "ultimo_imc": latest.get("imc"),
-            "ultimo_peso_grasa": latest.get("pesoGrasa"),
-            "ultimo_porcentaje_grasa": latest.get("porcentajeGrasa"),
-            "ultimo_peso_masa_magra": latest.get("pesoMasaMagra"),
-            "ultimo_peso_agua": latest.get("pesoAgua"),
-            "ultimo_perimetro_cintura": latest.get("perimetroCintura"),
-            "ultimo_perimetro_cadera": latest.get("perimetroCadera"),
-            "fecha_ultimo": _parse_datetime(latest.get("createdTimestamp")),
+            "ultimo_peso_grasa": latest.get("peso_grasa"),
+            "ultimo_porcentaje_grasa": latest.get("porcentaje_grasa"),
+            "ultimo_peso_masa_magra": latest.get("peso_masa_magra"),
+            "ultimo_peso_agua": latest.get("peso_agua"),
+            "ultimo_perimetro_cintura": latest.get("perimetro_cintura"),
+            "ultimo_perimetro_cintura_umbilical": latest.get("perimetro_cintura_umbilical"),
+            "ultimo_perimetro_cadera": latest.get("perimetro_cadera"),
+            "fecha_ultimo": latest.get("fecha"),
+            "delta_peso": _delta(latest.get("peso"), previous.get("peso")),
+            "delta_imc": _delta(latest.get("imc"), previous.get("imc")),
+            "historial": historial,
             "raw": self._seguimientos(),
         }
 
@@ -374,12 +462,15 @@ class DietoProDietistaSensor(DietoProEntity):
     def extra_state_attributes(self) -> dict:
         dietista = self._dietista() or {}
         avatar = dietista.get("avatar")
+        titulacion = dietista.get("titulacion")
         return {
             "email": dietista.get("email"),
             "telefono": dietista.get("mobilePhone"),
             "num_colegiacion": dietista.get("numColegiacion"),
             "chat_disponible": dietista.get("chatAvailable"),
+            "idioma": dietista.get("locale"),
             "avatar": f"{BASE_URL}{avatar}" if avatar else None,
+            "titulacion_pdf": f"{BASE_URL}{titulacion}" if titulacion else None,
             "nombres_franjas": {
                 item.get("ingestaType"): item.get("ingestaName")
                 for item in dietista.get("nombreIngestas") or []
@@ -418,7 +509,13 @@ class DietoProChatSensor(DietoProEntity):
 
 
 class DietoProPerfilSensor(DietoProEntity):
-    """The patient's own profile - GET /api/paciente/current-user."""
+    """The patient's own profile - GET /api/paciente/current-user.
+
+    Field names confirmed against a real response: "fullname" (a single
+    combined field here, unlike dietista's separate firstName/familyName),
+    "phone" (not "mobilePhone" like dietista uses), "dni", "address",
+    "locale", "isDietista", "online", "hideSeguimientos".
+    """
 
     _attr_icon = "mdi:account"
 
@@ -434,17 +531,18 @@ class DietoProPerfilSensor(DietoProEntity):
         perfil = self._perfil()
         if not perfil:
             return None
-        nombre = " ".join(
-            part for part in (perfil.get("firstName"), perfil.get("familyName")) if part
-        ).strip()
-        return nombre or _first_present(perfil, ("nombre", "name")) or None
+        return _first_present(perfil, ("fullname", "nombre", "name")) or None
 
     @property
     def extra_state_attributes(self) -> dict:
         perfil = self._perfil() or {}
         return {
             "email": perfil.get("email"),
-            "telefono": perfil.get("mobilePhone"),
+            "telefono": perfil.get("phone"),
+            "dni": perfil.get("dni"),
+            "direccion": perfil.get("address"),
+            "idioma": perfil.get("locale"),
+            "en_linea": perfil.get("online"),
             "raw": perfil,
         }
 

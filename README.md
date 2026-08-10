@@ -38,14 +38,20 @@ integración.
 Cada franja de una `dieta` (p. ej. `dieta.comida`) trae a su vez `hora` y una
 lista `subingestas` (una comida puede tener más de un plato, p. ej. desayuno
 = café + sándwich). Cada `subingesta.plato` trae `alimentoCantidades`
-(ingredientes: `alimento.nombre`, `cantidad`, `medidaCasera`), `energia`
-(kcal), `alergenos`, y `superPlato` (`nombre`, `receta` -puede ser `null` en
-platos simples como una pieza de fruta-, `comensales`, `duracion`, `rating`,
+(ingredientes: `alimento.nombre`, `cantidad`, `medidaCasera`, más el grupo y
+supergrupo del alimento), datos nutricionales completos (energía, proteínas,
+grasas, carbohidratos, fibra, sodio, potasio, calcio, hierro, vitaminas...),
+`alergenos`, y `superPlato` (`nombre`, `receta` -puede ser `null` en platos
+simples como una pieza de fruta-, `comensales`, `duracion`, `rating`,
 `imagePath`/`thumbnail`). Esto está confirmado contra una respuesta real de
 la API (no solo inferido del código de la app). El sensor `comidas_hoy`
-expone todo esto ya montado en su atributo `comidas`, y la tarjeta lo
-muestra desplegable con receta, alérgenos, calorías e ingredientes por cada
-plato.
+expone todo esto ya montado por plato en su atributo `comidas` (incluido un
+diccionario `nutrientes` por plato), y además un `resumen_nutricional` con
+el total del día (suma de todos los platos). La tarjeta lo muestra
+desplegable con receta, alérgenos, calorías e ingredientes por cada plato.
+
+El sensor `seguimientos` incluye además un `historial` completo (no solo el
+último registro) y `delta_peso`/`delta_imc` respecto a la medición anterior.
 
 **Único punto sin confirmar al 100%:** el nombre exacto del campo de fecha
 *dentro* del objeto `cita` (no había forma de verlo sin una respuesta real
