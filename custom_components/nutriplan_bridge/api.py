@@ -22,6 +22,12 @@ Confirmed from the decompiled RTK Query API slice (+ live route/verb checks):
 - GET  /api/paciente/chat/messages  -> chat message history
 - PUT  /api/paciente/chat/reset-unread     -> marks the chat as read
 - PUT  /api/paciente/superplato/{id}/rating -> body {"rating": n}, rate a dish
+- GET  /api/paciente/platos?change={platoId}&ingesta={franja} -> alternative
+  dishes for a meal slot (traced from the ChangePlatoOptions screen)
+- PATCH /api/paciente/plans/{planId} -> body {"currentId", "platoId",
+  "ingesta", "dieta"}, swaps a dish (traced the actual useChangePlatoMutation
+  call site - see async_change_plato's docstring for the one remaining
+  uncertainty around the "dieta" field)
 - POST /api/paciente/token/refresh  -> route confirmed to exist (POST-only);
   request/response body assumed to follow gesdinet/jwt-refresh-token-bundle
   defaults since no authenticated session was available to confirm it. If it
@@ -206,4 +212,49 @@ class DietoProApiClient:
             "PUT",
             f"/api/paciente/superplato/{super_plato_id}/rating",
             json={"rating": rating},
+        )
+
+    async def async_get_plato_options(self, plato_id: Any, franja: str) -> Any:
+        """Alternative dishes available to swap into a given meal slot.
+
+        Confirmed from the decompiled ChangePlatoOptions screen: builds the
+        URL by hand as "?change={plato_id}&ingesta={franja}" (not a JSON
+        body), where plato_id is the CURRENT dish's own "plato_id" (the
+        specific size/talla variant id exposed per plato in comidas_hoy,
+        not "super_plato_id").
+        """
+        return await self._async_request("GET", f"/api/paciente/platos?change={plato_id}&ingesta={franja}")
+
+    async def async_change_plato(
+        self, plan_id: Any, dieta: int, franja: str, current_subingesta_id: Any, new_plato_id: Any
+    ) -> Any:
+        """Swap a dish in the live plan for another one.
+
+        Confirmed by tracing the actual useChangePlatoMutation() call site in
+        the decompiled ChangePlatoOptions screen: PATCH /api/paciente/plans/
+        {plan_id} with body {"currentId", "platoId", "ingesta", "dieta"} (the
+        mutation argument minus "planId", which goes in the URL - literally
+        omit(args, ["planId"]) in the app's own code).
+
+        - current_subingesta_id: the dish being replaced - "subingesta_id"
+          on the plato entry in comidas_hoy's "comidas" attribute.
+        - new_plato_id: the replacement - "plato_id" on one of the options
+          returned by async_get_plato_options().
+        - dieta: index of the target day's dieta within the plan (comidas_hoy
+          exposes this as "dieta_index"). Every account seen while building
+          this integration only has a single dieta (index 0 either way), so
+          it was never possible to confirm whether the backend actually
+          wants an array index or a weekday number for accounts with more
+          than one dieta - this call mutates your live plan, so double check
+          the result in the app after using it on such an account.
+        """
+        return await self._async_request(
+            "PATCH",
+            f"/api/paciente/plans/{plan_id}",
+            json={
+                "currentId": current_subingesta_id,
+                "platoId": new_plato_id,
+                "ingesta": franja,
+                "dieta": dieta,
+            },
         )

@@ -159,7 +159,10 @@ class NutriplanBridgeCard extends HTMLElement {
           display: flex; align-items: center; gap: 8px; padding: 8px 12px;
           cursor: pointer; user-select: none;
         }
-        .meal-header ha-icon.meal-type { --mdc-icon-size: 18px; color: var(--primary-color); }
+        .meal-header ha-icon.meal-type { --mdc-icon-size: 18px; color: var(--primary-color); flex-shrink: 0; }
+        .meal-header .meal-thumb {
+          width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;
+        }
         .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); }
         .meal-header .plato { font-size: 0.92em; color: var(--primary-text-color); flex: 1; }
         .meal-header ha-icon.chevron {
@@ -254,6 +257,10 @@ class NutriplanBridgeCard extends HTMLElement {
     const summary = platos.length
       ? platos.map((p) => p.nombre || "Sin especificar").join(" + ")
       : "Sin especificar";
+    const thumbSrc = platos.find((p) => p.imagen)?.imagen;
+    const thumbHtml = thumbSrc
+      ? `<img class="meal-thumb" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('ha-icon'),{className:'meal-type',icon:'${icon}'}))" />`
+      : `<ha-icon class="meal-type" icon="${icon}"></ha-icon>`;
 
     let bodyHtml = "";
     if (isOpen) {
@@ -263,7 +270,7 @@ class NutriplanBridgeCard extends HTMLElement {
     return `
       <div class="meal-card">
         <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}">
-          <ha-icon class="meal-type" icon="${icon}"></ha-icon>
+          ${thumbHtml}
           <span class="franja">${label}${meal.hora ? ` · ${escapeHtml(meal.hora)}` : ""}</span>
           <span class="plato">${escapeHtml(summary)}</span>
           <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>

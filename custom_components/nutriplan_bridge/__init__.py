@@ -11,7 +11,7 @@ from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -26,6 +26,8 @@ CARD_URL_PATH = "/nutriplan_bridge_files/nutriplan-bridge-card.js"
 
 SERVICE_MARK_CHAT_READ = "marcar_chat_leido"
 SERVICE_RATE_DISH = "valorar_plato"
+SERVICE_PLATO_OPTIONS = "opciones_plato"
+SERVICE_CHANGE_PLATO = "cambiar_plato"
 
 _ENTRY_SCHEMA = {vol.Optional("config_entry_id"): cv.string}
 
@@ -36,6 +38,25 @@ RATE_DISH_SCHEMA = vol.Schema(
         **_ENTRY_SCHEMA,
         vol.Required("super_plato_id"): vol.Any(cv.positive_int, cv.string),
         vol.Required("rating"): vol.All(vol.Coerce(float), vol.Range(min=1, max=5)),
+    }
+)
+
+PLATO_OPTIONS_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("plato_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("franja"): cv.string,
+    }
+)
+
+CHANGE_PLATO_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("plan_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("dieta"): cv.positive_int,
+        vol.Required("franja"): cv.string,
+        vol.Required("subingesta_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("nuevo_plato_id"): vol.Any(cv.positive_int, cv.string),
     }
 )
 
@@ -90,6 +111,31 @@ async def _async_handle_rate_dish(hass: HomeAssistant, call: ServiceCall) -> Non
     await coordinator.async_request_refresh()
 
 
+async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        result = await coordinator.client.async_get_plato_options(call.data["plato_id"], call.data["franja"])
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise HomeAssistantError(str(err)) from err
+    return {"opciones": result}
+
+
+async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        result = await coordinator.client.async_change_plato(
+            call.data["plan_id"],
+            call.data["dieta"],
+            call.data["franja"],
+            call.data["subingesta_id"],
+            call.data["nuevo_plato_id"],
+        )
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise HomeAssistantError(str(err)) from err
+    await coordinator.async_request_refresh()
+    return {"resultado": result}
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Register the bundled Lovelace card and the two write services once,
     regardless of how many accounts are configured."""
@@ -110,8 +156,28 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _rate_dish(call: ServiceCall) -> None:
             await _async_handle_rate_dish(hass, call)
 
+        async def _plato_options(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_plato_options(hass, call)
+
+        async def _change_plato(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_change_plato(hass, call)
+
         hass.services.async_register(DOMAIN, SERVICE_MARK_CHAT_READ, _mark_chat_read, schema=MARK_CHAT_READ_SCHEMA)
         hass.services.async_register(DOMAIN, SERVICE_RATE_DISH, _rate_dish, schema=RATE_DISH_SCHEMA)
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_PLATO_OPTIONS,
+            _plato_options,
+            schema=PLATO_OPTIONS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CHANGE_PLATO,
+            _change_plato,
+            schema=CHANGE_PLATO_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
         _services_registered = True
 
     return True

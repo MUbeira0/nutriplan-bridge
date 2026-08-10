@@ -46,9 +46,12 @@ simples como una pieza de fruta-, `comensales`, `duracion`, `rating`,
 `imagePath`/`thumbnail`). Esto está confirmado contra una respuesta real de
 la API (no solo inferido del código de la app). El sensor `comidas_hoy`
 expone todo esto ya montado por plato en su atributo `comidas` (incluido un
-diccionario `nutrientes` por plato), y además un `resumen_nutricional` con
-el total del día (suma de todos los platos). La tarjeta lo muestra
-desplegable con receta, alérgenos, calorías e ingredientes por cada plato.
+diccionario `nutrientes` por plato, y los identificadores `subingesta_id`/
+`plato_id`/`super_plato_id` que hacen falta para las acciones de cambiar o
+valorar un plato), y además un `resumen_nutricional` con el total del día
+(suma de todos los platos), y `plan_id`/`dieta_index` para las mismas
+acciones. La tarjeta lo muestra desplegable con receta, alérgenos, calorías
+e ingredientes por cada plato.
 
 El sensor `seguimientos` incluye además un `historial` completo (no solo el
 último registro) y `delta_peso`/`delta_imc`/`delta_peso_grasa`/`delta_porcentaje_grasa`
@@ -90,11 +93,21 @@ Esto crea 10 entidades bajo un dispositivo "Nutriplan Bridge":
 `sensor.nutriplan_bridge_mi_perfil`, `sensor.nutriplan_bridge_estado_eni`,
 `sensor.nutriplan_bridge_valoraciones`, `sensor.nutriplan_bridge_charlas`.
 
-Y dos acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
 - `nutriplan_bridge.marcar_chat_leido`
 - `nutriplan_bridge.valorar_plato` (necesita el `super_plato_id` que trae
   cada plato en el atributo `comidas` del sensor `comidas_hoy`, y una
   puntuación de 1 a 5)
+- `nutriplan_bridge.opciones_plato` (solo lectura: lista los platos
+  alternativos para sustituir uno en una franja, usando `plato_id` + `franja`
+  del atributo `comidas`)
+- `nutriplan_bridge.cambiar_plato` — **modifica tu plan real, no es
+  reversible desde HA**. Necesita `plan_id`, `dieta` (el `dieta_index` del
+  sensor `comidas_hoy`), `franja`, `subingesta_id` (el plato a sustituir) y
+  `nuevo_plato_id` (de `opciones_plato`). El campo `dieta` nunca se pudo
+  confirmar al 100% para cuentas con más de una dieta (todas las cuentas
+  vistas mientras se construía esto solo tenían una) — revisa el resultado
+  en la app si tu plan tiene varios horarios.
 
 ## Tarjeta
 

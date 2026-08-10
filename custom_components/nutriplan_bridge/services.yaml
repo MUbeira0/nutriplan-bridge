@@ -45,3 +45,96 @@ valorar_plato:
           max: 5
           step: 0.5
           mode: slider
+
+opciones_plato:
+  name: Ver opciones de plato
+  description: >-
+    Lista los platos alternativos disponibles para sustituir uno concreto en
+    una franja horaria. Solo lectura, no cambia nada. Usa el resultado para
+    elegir el "nuevo_plato_id" de la acción "cambiar_plato".
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    plato_id:
+      name: ID del plato actual
+      description: >-
+        El "plato_id" (no el super_plato_id) del plato que quieres sustituir,
+        del atributo "comidas" del sensor comidas_hoy.
+      required: true
+      selector:
+        text:
+    franja:
+      name: Franja
+      description: >-
+        La franja horaria (p. ej. "desayuno", "comida", "cena") - el
+        atributo "franja" de la comida en cuestión.
+      required: true
+      selector:
+        text:
+
+cambiar_plato:
+  name: Cambiar plato
+  description: >-
+    Sustituye un plato del plan activo por otro. IMPORTANTE: esto modifica tu
+    plan real en DietoPro, no es reversible desde Home Assistant (aunque
+    puedes volver a cambiarlo desde la app). El campo "dieta" nunca se pudo
+    confirmar del todo contra una cuenta con más de una dieta - revisa el
+    resultado en la app tras usarlo si tu plan tiene varios horarios.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    plan_id:
+      name: ID del plan
+      description: El "plan_id" del atributo del sensor "Comidas de hoy".
+      required: true
+      selector:
+        text:
+    dieta:
+      name: Índice de la dieta
+      description: >-
+        El "dieta_index" del atributo del sensor "Comidas de hoy" (casi
+        siempre 0).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 10
+          mode: box
+    franja:
+      name: Franja
+      description: >-
+        La franja horaria (p. ej. "comida") - el atributo "franja" de la
+        comida en cuestión.
+      required: true
+      selector:
+        text:
+    subingesta_id:
+      name: ID del plato a sustituir
+      description: >-
+        El "subingesta_id" del plato que se va a reemplazar, del atributo
+        "comidas" del sensor comidas_hoy.
+      required: true
+      selector:
+        text:
+    nuevo_plato_id:
+      name: ID del nuevo plato
+      description: >-
+        El "plato_id" de la opción elegida (resultado de la acción
+        "opciones_plato").
+      required: true
+      selector:
+        text:

@@ -155,19 +155,22 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _plato_detail(plato: Any) -> dict:
-    """Expand one raw "plato" object into name/receta/ingredientes/allergens.
+def _plato_detail(sub: Any) -> dict:
+    """Expand one raw "subingesta" object into name/receta/ingredientes/allergens.
 
     Confirmed against a real (user-supplied) API response: a meal slot
     ("ingesta", e.g. dieta.desayuno) carries a "subingestas" array; each
-    subingesta has a "plato" object with "alimentoCantidades" (ingredient
-    list: alimento.nombre + cantidad + medidaCasera), "energia" (kcal for
-    that serving), "alergenos", and "superPlato" (nombre, receta - can be
-    null for simple items like a piece of fruit -, comensales, duracion,
-    rating, imagePath/thumbnail - relative paths made absolute via BASE_URL).
+    subingesta has an "id" (needed to swap this dish - see
+    api.async_change_plato) and a "plato" object with "id" (this specific
+    size/talla variant), "alimentoCantidades" (ingredient list:
+    alimento.nombre + cantidad + medidaCasera), "energia" (kcal for that
+    serving), "alergenos", and "superPlato" (nombre, receta - can be null
+    for simple items like a piece of fruit -, comensales, duracion, rating,
+    imagePath/thumbnail - relative paths made absolute via BASE_URL).
     """
-    if not isinstance(plato, dict):
+    if not isinstance(sub, dict):
         return {}
+    plato = sub.get("plato") if isinstance(sub.get("plato"), dict) else {}
 
     super_plato = plato.get("superPlato") if isinstance(plato.get("superPlato"), dict) else {}
     ingredientes = []
@@ -193,6 +196,8 @@ def _plato_detail(plato: Any) -> dict:
     image_path = super_plato.get("imagePath") or super_plato.get("thumbnail")
     energia = plato.get("energia")
     return {
+        "subingesta_id": sub.get("id"),
+        "plato_id": plato.get("id"),
         "super_plato_id": super_plato.get("id"),
         "nombre": super_plato.get("nombre"),
         "receta": super_plato.get("receta"),
@@ -222,7 +227,7 @@ def _meal_detail(slot: str, ingesta: Any) -> dict:
     for sub in ingesta.get("subingestas") or []:
         if not isinstance(sub, dict):
             continue
-        platos.append(_plato_detail(sub.get("plato")))
+        platos.append(_plato_detail(sub))
 
     return {
         "franja": slot,
@@ -316,18 +321,26 @@ class DietoProTodayMealsSensor(DietoProEntity):
         dietas = plan.get("dietas") if isinstance(plan, dict) else None
         return dietas if isinstance(dietas, list) else []
 
-    def _todays_dieta(self) -> dict | None:
+    def _todays_dieta_indexed(self) -> tuple[int, dict] | tuple[None, None]:
+        """Returns (index-within-plan.dietas, dieta). The index is needed as
+        the "dieta" field when calling the cambiar_plato action - never
+        confirmed whether the backend actually wants this array index or a
+        weekday number, since every account seen so far only has one dieta
+        (index 0 either way)."""
         dietas = self._dietas()
         if not dietas:
-            return None
+            return None, None
         if len(dietas) == 1:
-            return dietas[0]
+            return 0, dietas[0]
         today_name = WEEKDAYS_ES[dt_util.now().weekday()]
-        for dieta in dietas:
+        for i, dieta in enumerate(dietas):
             nombre = _strip_accents(str(dieta.get("nombreHorario") or "")).lower()
             if today_name in nombre:
-                return dieta
-        return dietas[0]
+                return i, dieta
+        return 0, dietas[0]
+
+    def _todays_dieta(self) -> dict | None:
+        return self._todays_dieta_indexed()[1]
 
     def _meals(self) -> list[dict]:
         dieta = self._todays_dieta()
@@ -349,7 +362,9 @@ class DietoProTodayMealsSensor(DietoProEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        dieta = self._todays_dieta() or {}
+        dieta_index, dieta = self._todays_dieta_indexed()
+        dieta = dieta or {}
+        plan = (self.coordinator.data or {}).get("plan_detail") or {}
         meals = self._meals()
         all_platos = [p for m in meals for p in (m.get("platos") or [])]
         return {
@@ -358,6 +373,8 @@ class DietoProTodayMealsSensor(DietoProEntity):
             "total_platos": len(all_platos),
             "resumen_nutricional": _sum_nutrients([p.get("nutrientes") or {} for p in all_platos]),
             "comidas": meals,
+            "plan_id": plan.get("id"),
+            "dieta_index": dieta_index,
             "raw": dieta,
         }
 
