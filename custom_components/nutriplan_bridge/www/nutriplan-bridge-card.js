@@ -366,7 +366,17 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 }
 
-customElements.define("nutriplan-bridge-card", NutriplanBridgeCard);
+// Guarded: if this module is ever evaluated more than once in the same page
+// (duplicate resource registration, a stale + fresh copy both injected,
+// dev-tools re-injection, etc.) a second bare customElements.define() call
+// throws "has already been used with this registry" - and since that throw
+// happens at the TOP LEVEL of the module (not inside any try/catch), it
+// would silently abort the rest of the script, including the
+// window.customCards.push() below, which is exactly why the card could
+// disappear entirely from the "Add card" picker instead of showing an error.
+if (!customElements.get("nutriplan-bridge-card")) {
+  customElements.define("nutriplan-bridge-card", NutriplanBridgeCard);
+}
 
 /* Visual (GUI) editor: shown when the user clicks "Edit" on the card in the
  * dashboard. All fields are optional - entities are auto-detected - this is
@@ -438,11 +448,15 @@ class NutriplanBridgeCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("nutriplan-bridge-card-editor", NutriplanBridgeCardEditor);
+if (!customElements.get("nutriplan-bridge-card-editor")) {
+  customElements.define("nutriplan-bridge-card-editor", NutriplanBridgeCardEditor);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "nutriplan-bridge-card",
-  name: "Nutriplan Bridge",
-  description: "Plan actual, comidas de hoy (con receta e ingredientes), próxima cita y seguimientos.",
-});
+if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
+  window.customCards.push({
+    type: "nutriplan-bridge-card",
+    name: "Nutriplan Bridge",
+    description: "Plan actual, comidas de hoy (con receta e ingredientes), próxima cita y seguimientos.",
+  });
+}
