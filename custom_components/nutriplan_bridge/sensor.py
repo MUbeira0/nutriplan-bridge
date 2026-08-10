@@ -607,8 +607,36 @@ class DietoProPerfilSensor(DietoProEntity):
         }
 
 
+def _name(value: Any) -> Any:
+    """Many ENI fields are {"id": n, "nombre": "..."} option objects - pull the label."""
+    return value.get("nombre") if isinstance(value, dict) else value
+
+
+def _names(value: Any) -> list:
+    if not isinstance(value, list):
+        return []
+    return [_name(item) for item in value if isinstance(item, dict)]
+
+
+def _age_years(birthdate: Any) -> int | None:
+    born = _parse_datetime(birthdate)
+    if born is None:
+        return None
+    today = dt_util.now()
+    years = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    return years
+
+
 class DietoProEniSensor(DietoProEntity):
-    """Initial nutrition survey (onboarding wizard) status - GET /api/paciente/eni."""
+    """Initial nutrition survey (onboarding wizard) - GET /api/paciente/eni.
+
+    Confirmed against a real response: it's not a simple "% complete"
+    tracker, it's the full survey answer sheet (objetivo, antropometria,
+    alergias, farmacos, habitos...) plus the resulting energy/macro targets
+    DietoPro computed from it. "lastViewedStep" reaching "eniFinish" is what
+    marks it as completed - the boolean flags this sensor originally guessed
+    at (completed/finished/isCompleted) don't exist.
+    """
 
     _attr_icon = "mdi:clipboard-text-outline"
 
@@ -624,14 +652,74 @@ class DietoProEniSensor(DietoProEntity):
         eni = self._eni()
         if eni is None:
             return "sin_iniciar"
-        completed = _first_present(eni, ("completed", "finished", "isCompleted", "isFinished"))
-        if isinstance(completed, bool):
-            return "completada" if completed else "en_progreso"
-        return "en_progreso"
+        return "completada" if eni.get("lastViewedStep") == "eniFinish" else "en_progreso"
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"raw": self._eni()}
+        eni = self._eni()
+        if not eni:
+            return {"raw": None}
+
+        altura_cm = eni.get("altura")
+        peso = eni.get("peso")
+        imc_calculado = None
+        if isinstance(altura_cm, (int, float)) and altura_cm and isinstance(peso, (int, float)):
+            imc_calculado = round(peso / ((altura_cm / 100) ** 2), 2)
+
+        macros = eni.get("porcentajeMacronutrientes") if isinstance(eni.get("porcentajeMacronutrientes"), dict) else {}
+        objetivo = eni.get("objetivoTratamiento") if isinstance(eni.get("objetivoTratamiento"), dict) else {}
+
+        return {
+            "ultimo_paso": eni.get("lastViewedStep"),
+            "objetivo_tratamiento": objetivo.get("nombre"),
+            "objetivo_tratamiento_descripcion": objetivo.get("descripcion"),
+            "motivo_visita": eni.get("motivoVisita"),
+            "sexo": _name(eni.get("sexo")),
+            "fecha_nacimiento": eni.get("fechaNacimiento"),
+            "edad": _age_years(eni.get("fechaNacimiento")),
+            "altura_cm": altura_cm,
+            "peso_kg": peso,
+            "peso_corregido_kg": eni.get("pesoCorregido"),
+            "peso_sugerido_kg": eni.get("pesoSugerido"),
+            "imc_calculado": imc_calculado,
+            "porcentaje_grasa_actual": eni.get("porcentajeGrasaActual"),
+            "perimetro_cintura": eni.get("perimetroCintura"),
+            "perimetro_cadera": eni.get("perimetroCadera"),
+            "perimetro_muneca": eni.get("perimetroMuneca"),
+            "valor_energetico_dia": eni.get("valorEnergetico"),
+            "valor_energetico_min": eni.get("valorEnergeticoMin"),
+            "valor_energetico_max": eni.get("valorEnergeticoMax"),
+            "valor_energetico_por_dia": eni.get("valorEnergeticoPorDia"),
+            "objetivo_proteinas_pct": macros.get("proteinas"),
+            "objetivo_grasas_pct": macros.get("grasas"),
+            "objetivo_carbohidratos_pct": macros.get("glucidos"),
+            "ingesta_diaria_recomendada": _nutrients(eni.get("ingestaRecomendadaPlan") or {}),
+            "agua_dia_litros": _name(eni.get("aguaDia")),
+            "estilo_alimentacion": _name(eni.get("estiloAlimentacion")),
+            "actividad_fisica": _name(eni.get("actividadFisica")),
+            "deportista": _name(eni.get("deportista")),
+            "turno_laboral": _name(eni.get("turnoLaboral")),
+            "comentarios_horarios": eni.get("comentariosHorarios"),
+            "dificultad_cocina": _name(eni.get("dificultadCocina")),
+            "temporada": _name(eni.get("temporada")),
+            "menstruacion": _name(eni.get("menstruacion")),
+            "consumo_alcohol": _name(eni.get("consumoAlcohol")),
+            "consumo_tabaco": _name(eni.get("consumoTabaco")),
+            "grado_motivacion": _name(eni.get("gradoMotivacion")),
+            "antecedentes_familiares": _name(eni.get("antecedentesFamiliares")),
+            "trastornos_alimentacion": _name(eni.get("trastornosAlimentacion")),
+            "intentos_previos": _name(eni.get("intentosPrevios")),
+            "ya_recortando": _name(eni.get("yaRecortando")),
+            "comer_deprisa": _name(eni.get("comerDeprisa")),
+            "picar_entre_horas": _name(eni.get("picarHoras")),
+            "tipo_trabajo": _name(eni.get("tipoTrabajo")),
+            "patologias": _names(eni.get("patologias")),
+            "farmacos": [f.get("nombre") for f in eni.get("farmacos") or [] if isinstance(f, dict)],
+            "alergias": _names(eni.get("alimentosAlergias")) + _names(eni.get("gruposAlimentosAlergias")),
+            "intolerancias": _names(eni.get("alimentosIntolerancias")) + _names(eni.get("gruposAlimentosIntolerancias")),
+            "aversiones": _names(eni.get("alimentosAversiones")) + _names(eni.get("gruposAlimentosAversiones")),
+            "raw": eni,
+        }
 
 
 class DietoProValoracionesSensor(DietoProEntity):

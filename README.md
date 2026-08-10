@@ -57,6 +57,14 @@ respecto a la medición anterior. El campo real de agua corporal es
 la cuenta no manda directamente `pesoAgua`/`pesoMasaMagra`, se calculan
 (`peso_agua = peso * porcentajeAgua / 100`, `peso_masa_magra = peso - peso_grasa`).
 
+El sensor `estado_eni` no es solo "% completado": es la ficha completa de la
+encuesta inicial (objetivo, antropometría, alergias/intolerancias/aversiones,
+fármacos, hábitos de vida, y los objetivos de energía/macros que DietoPro
+calculó a partir de ella, incluida una `ingesta_diaria_recomendada` con el
+mismo formato que los `nutrientes` de cada plato). Se completa cuando
+`lastViewedStep` llega a `"eniFinish"` (los flags booleanos que se habían
+intuido al principio no existen).
+
 **Único punto sin confirmar al 100%:** el nombre exacto del campo de fecha
 *dentro* del objeto `cita` (no había forma de verlo sin una respuesta real
 autenticada). El sensor de "Próxima cita" prueba varios nombres candidatos y,
