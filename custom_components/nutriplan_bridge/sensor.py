@@ -1,12 +1,16 @@
-"""Sensors for DietoPro: current plan, today's meals, next appointment and seguimientos.
+"""Sensors for DietoPro: current plan, today's meals (with recipes), next
+appointment and seguimientos.
 
 Field names used below (sentByEmailAt, nombreHorario, the 9 meal-slot keys,
-peso/imc/pesoGrasa/...) are not guessed: they come from decompiling the app's
-own compiled bundle with hermes-dec (see api.py docstring for the full
-breakdown). The one thing that could NOT be confirmed without a live account
-is the exact date field inside a "cita" (appointment) object, so that one
-still uses a defensive multi-candidate lookup and always exposes the raw
-payload as an attribute.
+subingestas/plato/superPlato/receta/alergenos, peso/imc/pesoGrasa/...) are
+not guessed: the meal-slot layout was confirmed by decompiling the app's own
+compiled bundle with hermes-dec (see api.py docstring), and the
+subingestas -> plato -> superPlato nesting plus exact field names were
+additionally verified against a real authenticated API response. The one
+thing that could NOT be confirmed against a real response is the exact date
+field inside a "cita" (appointment) object, so that one still uses a
+defensive multi-candidate lookup and always exposes the raw payload as an
+attribute.
 """
 from __future__ import annotations
 
@@ -83,17 +87,19 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _meal_detail(slot: str, plato: Any) -> dict:
-    """Expand a raw meal-slot ("ingesta") object into plato/receta/ingredientes.
+def _plato_detail(plato: Any) -> dict:
+    """Expand one raw "plato" object into name/receta/ingredientes/allergens.
 
-    Confirmed by decompiling the app's PlatoDetail screen component
-    (/(app)/planes/plato.tsx): each meal slot object carries
-    "alimentoCantidades" (ingredient list: alimento.nombre + cantidad +
-    medidaCasera) and "superPlato" (nombre, receta, comensales, rating,
-    thumbnail - a relative path made absolute via BASE_URL + thumbnail).
+    Confirmed against a real (user-supplied) API response: a meal slot
+    ("ingesta", e.g. dieta.desayuno) carries a "subingestas" array; each
+    subingesta has a "plato" object with "alimentoCantidades" (ingredient
+    list: alimento.nombre + cantidad + medidaCasera), "energia" (kcal for
+    that serving), "alergenos", and "superPlato" (nombre, receta - can be
+    null for simple items like a piece of fruit -, comensales, duracion,
+    rating, imagePath/thumbnail - relative paths made absolute via BASE_URL).
     """
     if not isinstance(plato, dict):
-        return {"franja": slot}
+        return {}
 
     super_plato = plato.get("superPlato") if isinstance(plato.get("superPlato"), dict) else {}
     ingredientes = []
@@ -109,15 +115,40 @@ def _meal_detail(slot: str, plato: Any) -> dict:
             }
         )
 
-    thumbnail = super_plato.get("thumbnail")
+    image_path = super_plato.get("imagePath") or super_plato.get("thumbnail")
+    energia = plato.get("energia")
     return {
-        "franja": slot,
-        "plato": super_plato.get("nombre"),
+        "nombre": super_plato.get("nombre"),
         "receta": super_plato.get("receta"),
         "comensales": super_plato.get("comensales"),
+        "duracion_min": super_plato.get("duracion"),
         "rating": super_plato.get("rating"),
-        "imagen": f"{BASE_URL}{thumbnail}" if thumbnail else None,
+        "calorias": round(energia) if isinstance(energia, (int, float)) else energia,
+        "alergenos": plato.get("alergenos") or [],
+        "imagen": f"{BASE_URL}{image_path}" if image_path else None,
         "ingredientes": ingredientes,
+    }
+
+
+def _meal_detail(slot: str, ingesta: Any) -> dict:
+    """Expand a raw meal-slot ("ingesta") object into its list of platos.
+
+    A meal slot can carry more than one dish (e.g. desayuno = coffee +
+    sandwich), one per "subingesta".
+    """
+    if not isinstance(ingesta, dict):
+        return {"franja": slot}
+
+    platos = []
+    for sub in ingesta.get("subingestas") or []:
+        if not isinstance(sub, dict):
+            continue
+        platos.append(_plato_detail(sub.get("plato")))
+
+    return {
+        "franja": slot,
+        "hora": ingesta.get("hora"),
+        "platos": platos,
     }
 
 
@@ -228,9 +259,11 @@ class DietoProTodayMealsSensor(DietoProEntity):
     def extra_state_attributes(self) -> dict:
         dieta = self._todays_dieta() or {}
         meals = self._meals()
+        total_platos = sum(len(m.get("platos") or []) for m in meals)
         return {
             "horario": dieta.get("nombreHorario"),
             "franjas": [m["franja"] for m in meals],
+            "total_platos": total_platos,
             "comidas": meals,
             "raw": dieta,
         }

@@ -15,7 +15,9 @@
  * dietista_entity: sensor.nutriplan_bridge_dietista
  *
  * The "comidas_hoy" sensor's "comidas" attribute carries, per meal slot:
- * { franja, plato, receta, comensales, rating, imagen, ingredientes: [{nombre, cantidad, medida_casera}] }
+ * { franja, hora, platos: [{ nombre, receta, comensales, duracion_min, rating,
+ *   calorias, alergenos, imagen, ingredientes: [{nombre, cantidad, medida_casera}] }] }
+ * (a slot can have more than one plato, e.g. desayuno = coffee + sandwich)
  */
 
 const MEAL_LABELS = {
@@ -133,11 +135,14 @@ class NutriplanBridgeCard extends HTMLElement {
           transition: transform .15s ease;
         }
         .meal-header.expanded ha-icon.chevron { transform: rotate(180deg); }
-        .meal-body { padding: 0 14px 14px 14px; }
-        .meal-body img {
+        .meal-body { padding: 0 14px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
+        .plato-block:not(:first-child) { padding-top: 12px; border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
+        .plato-nombre { font-size: 0.95em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 6px; }
+        .plato-block img {
           width: 100%; max-height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
         }
-        .meal-meta { display: flex; gap: 14px; font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 8px; }
+        .meal-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 6px; }
+        .meal-alergenos { font-size: 0.76em; color: var(--secondary-text-color); margin-bottom: 6px; }
         .meal-receta { font-size: 0.88em; color: var(--primary-text-color); white-space: pre-line; margin-bottom: 8px; }
         .meal-ingredientes { margin: 0; padding-left: 18px; font-size: 0.85em; color: var(--primary-text-color); }
         .meal-ingredientes li { margin-bottom: 2px; }
@@ -165,42 +170,70 @@ class NutriplanBridgeCard extends HTMLElement {
     this._render();
   }
 
+  _renderPlato(plato) {
+    const img = plato.imagen
+      ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" />`
+      : "";
+    const metaParts = [];
+    if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
+    if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} comensales`);
+    if (plato.duracion_min) metaParts.push(`${escapeHtml(plato.duracion_min)} min`);
+    if (plato.rating) metaParts.push(`★ ${Number(plato.rating).toFixed(1)}`);
+    const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
+
+    const alergenos =
+      plato.alergenos && plato.alergenos.length
+        ? `<div class="meal-alergenos">Alérgenos: ${plato.alergenos.map(escapeHtml).join(", ")}</div>`
+        : "";
+
+    const receta = plato.receta
+      ? `<div class="meal-receta">${escapeHtml(plato.receta)}</div>`
+      : '<div class="empty">Sin receta detallada (plato simple)</div>';
+
+    const ingredientes =
+      plato.ingredientes && plato.ingredientes.length
+        ? `<ul class="meal-ingredientes">${plato.ingredientes
+            .map((ing) => {
+              const cantidad = ing.cantidad ? `${escapeHtml(ing.cantidad)}g ` : "";
+              const medida = ing.medida_casera ? ` (${escapeHtml(ing.medida_casera)})` : "";
+              return `<li>${cantidad}${escapeHtml(ing.nombre || "")}${medida}</li>`;
+            })
+            .join("")}</ul>`
+        : "";
+
+    return `
+      <div class="plato-block">
+        <div class="plato-nombre">${escapeHtml(plato.nombre || "Sin especificar")}</div>
+        ${img}
+        ${meta}
+        ${alergenos}
+        ${receta}
+        ${ingredientes}
+      </div>
+    `;
+  }
+
   _renderMeal(meal) {
     const franja = meal.franja;
     const isOpen = this._expanded.has(franja);
     const icon = MEAL_ICONS[franja] || "mdi:food";
     const label = MEAL_LABELS[franja] || franja;
-    const platoName = meal.plato || "Sin especificar";
+    const platos = meal.platos || [];
+    const summary = platos.length
+      ? platos.map((p) => p.nombre || "Sin especificar").join(" + ")
+      : "Sin especificar";
 
     let bodyHtml = "";
     if (isOpen) {
-      const img = meal.imagen ? `<img src="${escapeHtml(meal.imagen)}" alt="${escapeHtml(platoName)}" />` : "";
-      const metaParts = [];
-      if (meal.comensales) metaParts.push(`${escapeHtml(meal.comensales)} comensales`);
-      if (meal.rating) metaParts.push(`★ ${escapeHtml(meal.rating)}`);
-      const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
-      const receta = meal.receta
-        ? `<div class="meal-receta">${escapeHtml(meal.receta)}</div>`
-        : '<div class="empty">Sin receta disponible</div>';
-      const ingredientes =
-        meal.ingredientes && meal.ingredientes.length
-          ? `<ul class="meal-ingredientes">${meal.ingredientes
-              .map((ing) => {
-                const cantidad = ing.cantidad ? `${escapeHtml(ing.cantidad)}g ` : "";
-                const medida = ing.medida_casera ? ` (${escapeHtml(ing.medida_casera)})` : "";
-                return `<li>${cantidad}${escapeHtml(ing.nombre || "")}${medida}</li>`;
-              })
-              .join("")}</ul>`
-          : "";
-      bodyHtml = `<div class="meal-body">${img}${meta}${receta}${ingredientes}</div>`;
+      bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlato(p)).join("")}</div>`;
     }
 
     return `
       <div class="meal-card">
         <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}">
           <ha-icon class="meal-type" icon="${icon}"></ha-icon>
-          <span class="franja">${label}</span>
-          <span class="plato">${escapeHtml(platoName)}</span>
+          <span class="franja">${label}${meal.hora ? ` · ${escapeHtml(meal.hora)}` : ""}</span>
+          <span class="plato">${escapeHtml(summary)}</span>
           <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
         </div>
         ${bodyHtml}

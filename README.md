@@ -24,13 +24,17 @@ cuenta) para confirmar qué rutas existen y qué verbo aceptan.
 - `GET /api/paciente/seguimientos` — lista con `peso`, `imc`, `pesoGrasa`, `porcentajeGrasa`, `pesoMasaMagra`, `pesoAgua`, `perimetroCintura`, `perimetroCinturaUmbilical`, `perimetroCadera`, `createdTimestamp`
 - `GET /api/paciente/dietista`
 
-Cada plato de una `dieta` (p. ej. `dieta.comida`) trae a su vez
-`alimentoCantidades` (ingredientes: `alimento.nombre`, `cantidad`,
-`medidaCasera`) y `superPlato` (`nombre`, `receta`, `comensales`, `rating`,
-`thumbnail`) — confirmado leyendo el componente `PlatoDetail` de la propia
-app (`/(app)/planes/plato.tsx`). El sensor `comidas_hoy` expone todo esto ya
-montado en su atributo `comidas`, y la tarjeta lo muestra desplegable con
-receta e ingredientes.
+Cada franja de una `dieta` (p. ej. `dieta.comida`) trae a su vez `hora` y una
+lista `subingestas` (una comida puede tener más de un plato, p. ej. desayuno
+= café + sándwich). Cada `subingesta.plato` trae `alimentoCantidades`
+(ingredientes: `alimento.nombre`, `cantidad`, `medidaCasera`), `energia`
+(kcal), `alergenos`, y `superPlato` (`nombre`, `receta` -puede ser `null` en
+platos simples como una pieza de fruta-, `comensales`, `duracion`, `rating`,
+`imagePath`/`thumbnail`). Esto está confirmado contra una respuesta real de
+la API (no solo inferido del código de la app). El sensor `comidas_hoy`
+expone todo esto ya montado en su atributo `comidas`, y la tarjeta lo
+muestra desplegable con receta, alérgenos, calorías e ingredientes por cada
+plato.
 
 **Único punto sin confirmar al 100%:** el nombre exacto del campo de fecha
 *dentro* del objeto `cita` (no había forma de verlo sin una respuesta real
