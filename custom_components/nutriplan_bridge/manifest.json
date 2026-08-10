@@ -1,0 +1,11 @@
+{
+  "domain": "nutriplan_bridge",
+  "name": "Nutriplan Bridge",
+  "codeowners": ["@miguel"],
+  "config_flow": true,
+  "documentation": "https://github.com/MUbeira0/nutriplan-bridge",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/MUbeira0/nutriplan-bridge/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar cuenta",
+        "description": "Introduce las credenciales de tu cuenta de paciente en dietopro.com.",
+        "data": {
+          "email": "Correo electrónico",
+          "password": "Contraseña"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Email o contraseña incorrectos.",
+      "cannot_connect": "No se ha podido conectar con dietopro.com.",
+      "unknown": "Error inesperado."
+    },
+    "abort": {
+      "already_configured": "Esta cuenta ya está configurada."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones",
+        "data": {
+          "update_interval": "Intervalo de actualización (minutos)"
+        }
+      }
+    }
+  }
+}
