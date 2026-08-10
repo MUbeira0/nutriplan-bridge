@@ -56,13 +56,17 @@ WEEKDAYS_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "d
 # but unconfirmed assumption; the raw values are always in "raw" too.
 NUTRIENT_KEY_MAP = {
     "energia_kcal": "energia",
+    "energia_kcal_100g": "vet100",
+    "alcohol_g": "etanol",
     "proteinas_g": "proteinasTotales",
+    "proteinas_animales_g": "proteinasAnimales",
     "grasas_g": "grasasTotales",
     "grasas_saturadas_g": "ags",
     "grasas_monoinsaturadas_g": "agmi",
     "grasas_poliinsaturadas_g": "agpi",
     "colesterol_mg": "colesterol",
     "carbohidratos_g": "glucidosTotales",
+    "almidon_g": "polisacaridos",
     "azucares_g": "azucares",
     "azucares_anadidos_g": "azucaresAnadidos",
     "fibra_g": "fibra",
@@ -90,11 +94,17 @@ def _nutrients(plato: dict) -> dict:
     return {out_key: plato.get(src_key) for out_key, src_key in NUTRIENT_KEY_MAP.items()}
 
 
+# "energia_kcal_100g" is a density (kcal per 100g), not a total - summing it
+# across several dishes would produce a meaningless number, so it's excluded
+# from the daily aggregate even though it's shown per-dish.
+_SUMMABLE_NUTRIENT_KEYS = [k for k in NUTRIENT_KEY_MAP if k != "energia_kcal_100g"]
+
+
 def _sum_nutrients(nutrient_dicts: list[dict]) -> dict:
-    totals: dict[str, float] = {key: 0.0 for key in NUTRIENT_KEY_MAP}
+    totals: dict[str, float] = {key: 0.0 for key in _SUMMABLE_NUTRIENT_KEYS}
     seen = False
     for nutrients in nutrient_dicts:
-        for key in NUTRIENT_KEY_MAP:
+        for key in _SUMMABLE_NUTRIENT_KEYS:
             value = nutrients.get(key)
             if isinstance(value, (int, float)):
                 totals[key] += value
@@ -186,6 +196,7 @@ def _plato_detail(plato: Any) -> dict:
         "super_plato_id": super_plato.get("id"),
         "nombre": super_plato.get("nombre"),
         "receta": super_plato.get("receta"),
+        "notas_raciones": super_plato.get("observaciones"),
         "comensales": super_plato.get("comensales"),
         "duracion_min": super_plato.get("duracion"),
         "rating": super_plato.get("rating"),
@@ -576,6 +587,9 @@ class DietoProPerfilSensor(DietoProEntity):
             "direccion": perfil.get("address"),
             "idioma": perfil.get("locale"),
             "en_linea": perfil.get("online"),
+            "es_paciente": perfil.get("paciente"),
+            "es_dietista": perfil.get("isDietista"),
+            "seguimientos_ocultos": perfil.get("hideSeguimientos"),
             "raw": perfil,
         }
 
