@@ -13,6 +13,9 @@
  * appointment_entity: sensor.nutriplan_bridge_proxima_cita
  * tracking_entity: sensor.nutriplan_bridge_seguimientos
  * dietista_entity: sensor.nutriplan_bridge_dietista
+ *
+ * The "comidas_hoy" sensor's "comidas" attribute carries, per meal slot:
+ * { franja, plato, receta, comensales, rating, imagen, ingredientes: [{nombre, cantidad, medida_casera}] }
  */
 
 const MEAL_LABELS = {
@@ -60,7 +63,20 @@ function formatDate(iso) {
   });
 }
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 class NutriplanBridgeCard extends HTMLElement {
+  constructor() {
+    super();
+    this._expanded = new Set();
+  }
+
   setConfig(config) {
     this._config = config || {};
     this._render();
@@ -72,7 +88,7 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 5;
+    return 6;
   }
 
   static getStubConfig() {
@@ -99,17 +115,33 @@ class NutriplanBridgeCard extends HTMLElement {
           font-size: 0.78em; text-transform: uppercase; letter-spacing: .04em;
           color: var(--secondary-text-color); margin-bottom: 6px; font-weight: 500;
         }
-        .plan-name { font-size: 1.05em; color: var(--primary-text-color); }
-        .meals { display: flex; flex-wrap: wrap; gap: 8px; }
-        .meal-chip {
-          display: flex; align-items: center; gap: 6px;
+        .meals { display: flex; flex-direction: column; gap: 6px; }
+        .meal-card {
+          border-radius: 10px;
           background: var(--secondary-background-color, rgba(127,127,127,.08));
-          border-radius: 16px; padding: 6px 12px; font-size: 0.88em;
-          color: var(--primary-text-color);
+          overflow: hidden;
         }
-        .meal-chip ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); }
+        .meal-header {
+          display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+          cursor: pointer; user-select: none;
+        }
+        .meal-header ha-icon.meal-type { --mdc-icon-size: 18px; color: var(--primary-color); }
+        .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); }
+        .meal-header .plato { font-size: 0.92em; color: var(--primary-text-color); flex: 1; }
+        .meal-header ha-icon.chevron {
+          --mdc-icon-size: 20px; color: var(--secondary-text-color);
+          transition: transform .15s ease;
+        }
+        .meal-header.expanded ha-icon.chevron { transform: rotate(180deg); }
+        .meal-body { padding: 0 14px 14px 14px; }
+        .meal-body img {
+          width: 100%; max-height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
+        }
+        .meal-meta { display: flex; gap: 14px; font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 8px; }
+        .meal-receta { font-size: 0.88em; color: var(--primary-text-color); white-space: pre-line; margin-bottom: 8px; }
+        .meal-ingredientes { margin: 0; padding-left: 18px; font-size: 0.85em; color: var(--primary-text-color); }
+        .meal-ingredientes li { margin-bottom: 2px; }
         .empty { color: var(--secondary-text-color); font-style: italic; font-size: 0.9em; }
-        .row { display: flex; justify-content: space-between; align-items: center; }
         .appointment { display: flex; align-items: center; gap: 10px; }
         .appointment ha-icon { --mdc-icon-size: 22px; color: var(--primary-color); }
         .metrics { display: flex; gap: 18px; flex-wrap: wrap; }
@@ -121,6 +153,58 @@ class NutriplanBridgeCard extends HTMLElement {
       <ha-card>
         <div class="unavailable">Nutriplan Bridge: esperando datos de Home Assistant…</div>
       </ha-card>
+    `;
+  }
+
+  _toggle(franja) {
+    if (this._expanded.has(franja)) {
+      this._expanded.delete(franja);
+    } else {
+      this._expanded.add(franja);
+    }
+    this._render();
+  }
+
+  _renderMeal(meal) {
+    const franja = meal.franja;
+    const isOpen = this._expanded.has(franja);
+    const icon = MEAL_ICONS[franja] || "mdi:food";
+    const label = MEAL_LABELS[franja] || franja;
+    const platoName = meal.plato || "Sin especificar";
+
+    let bodyHtml = "";
+    if (isOpen) {
+      const img = meal.imagen ? `<img src="${escapeHtml(meal.imagen)}" alt="${escapeHtml(platoName)}" />` : "";
+      const metaParts = [];
+      if (meal.comensales) metaParts.push(`${escapeHtml(meal.comensales)} comensales`);
+      if (meal.rating) metaParts.push(`★ ${escapeHtml(meal.rating)}`);
+      const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
+      const receta = meal.receta
+        ? `<div class="meal-receta">${escapeHtml(meal.receta)}</div>`
+        : '<div class="empty">Sin receta disponible</div>';
+      const ingredientes =
+        meal.ingredientes && meal.ingredientes.length
+          ? `<ul class="meal-ingredientes">${meal.ingredientes
+              .map((ing) => {
+                const cantidad = ing.cantidad ? `${escapeHtml(ing.cantidad)}g ` : "";
+                const medida = ing.medida_casera ? ` (${escapeHtml(ing.medida_casera)})` : "";
+                return `<li>${cantidad}${escapeHtml(ing.nombre || "")}${medida}</li>`;
+              })
+              .join("")}</ul>`
+          : "";
+      bodyHtml = `<div class="meal-body">${img}${meta}${receta}${ingredientes}</div>`;
+    }
+
+    return `
+      <div class="meal-card">
+        <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}">
+          <ha-icon class="meal-type" icon="${icon}"></ha-icon>
+          <span class="franja">${label}</span>
+          <span class="plato">${escapeHtml(platoName)}</span>
+          <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
+        </div>
+        ${bodyHtml}
+      </div>
     `;
   }
 
@@ -149,16 +233,9 @@ class NutriplanBridgeCard extends HTMLElement {
     const planName =
       planEntity && planEntity.state !== "unknown" ? planEntity.state : "Sin plan activo";
 
-    const franjas = (mealsEntity && mealsEntity.attributes.franjas) || [];
-    const mealsHtml = franjas.length
-      ? `<div class="meals">${franjas
-          .map(
-            (f) =>
-              `<div class="meal-chip"><ha-icon icon="${MEAL_ICONS[f] || "mdi:food"}"></ha-icon>${
-                MEAL_LABELS[f] || f
-              }</div>`
-          )
-          .join("")}</div>`
+    const meals = (mealsEntity && mealsEntity.attributes.comidas) || [];
+    const mealsHtml = meals.length
+      ? `<div class="meals">${meals.map((m) => this._renderMeal(m)).join("")}</div>`
       : '<div class="empty">Sin comidas programadas para hoy</div>';
 
     let apptHtml = '<div class="empty">Sin próxima cita</div>';
@@ -192,8 +269,8 @@ class NutriplanBridgeCard extends HTMLElement {
       <div class="header">
         <ha-icon icon="mdi:food-apple"></ha-icon>
         <div>
-          <div class="title">${planName}</div>
-          <div class="subtitle">${dietistaName}</div>
+          <div class="title">${escapeHtml(planName)}</div>
+          <div class="subtitle">${escapeHtml(dietistaName)}</div>
         </div>
       </div>
 
@@ -216,6 +293,10 @@ class NutriplanBridgeCard extends HTMLElement {
           : ""
       }
     `;
+
+    card.querySelectorAll(".meal-header").forEach((el) => {
+      el.addEventListener("click", () => this._toggle(el.dataset.franja));
+    });
   }
 }
 
@@ -225,5 +306,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "nutriplan-bridge-card",
   name: "Nutriplan Bridge",
-  description: "Plan actual, comidas de hoy, próxima cita y seguimientos de tu cuenta de nutrición.",
+  description: "Plan actual, comidas de hoy (con receta e ingredientes), próxima cita y seguimientos.",
 });

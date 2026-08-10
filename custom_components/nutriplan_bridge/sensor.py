@@ -24,7 +24,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import BASE_URL, DOMAIN
 from .coordinator import DietoProDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,6 +81,44 @@ def _parse_datetime(value: Any) -> datetime | None:
             parsed = dt_util.as_local(parsed)
         return parsed
     return None
+
+
+def _meal_detail(slot: str, plato: Any) -> dict:
+    """Expand a raw meal-slot ("ingesta") object into plato/receta/ingredientes.
+
+    Confirmed by decompiling the app's PlatoDetail screen component
+    (/(app)/planes/plato.tsx): each meal slot object carries
+    "alimentoCantidades" (ingredient list: alimento.nombre + cantidad +
+    medidaCasera) and "superPlato" (nombre, receta, comensales, rating,
+    thumbnail - a relative path made absolute via BASE_URL + thumbnail).
+    """
+    if not isinstance(plato, dict):
+        return {"franja": slot}
+
+    super_plato = plato.get("superPlato") if isinstance(plato.get("superPlato"), dict) else {}
+    ingredientes = []
+    for item in plato.get("alimentoCantidades") or []:
+        if not isinstance(item, dict):
+            continue
+        alimento = item.get("alimento") if isinstance(item.get("alimento"), dict) else {}
+        ingredientes.append(
+            {
+                "nombre": alimento.get("nombre"),
+                "cantidad": item.get("cantidad"),
+                "medida_casera": item.get("medidaCasera"),
+            }
+        )
+
+    thumbnail = super_plato.get("thumbnail")
+    return {
+        "franja": slot,
+        "plato": super_plato.get("nombre"),
+        "receta": super_plato.get("receta"),
+        "comensales": super_plato.get("comensales"),
+        "rating": super_plato.get("rating"),
+        "imagen": f"{BASE_URL}{thumbnail}" if thumbnail else None,
+        "ingredientes": ingredientes,
+    }
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
@@ -176,23 +214,24 @@ class DietoProTodayMealsSensor(DietoProEntity):
                 return dieta
         return dietas[0]
 
-    def _ingestas(self) -> list[dict]:
+    def _meals(self) -> list[dict]:
         dieta = self._todays_dieta()
         if not isinstance(dieta, dict):
             return []
-        return [{"franja": slot, "detalle": dieta[slot]} for slot in MEAL_SLOT_KEYS if dieta.get(slot)]
+        return [_meal_detail(slot, dieta[slot]) for slot in MEAL_SLOT_KEYS if dieta.get(slot)]
 
     @property
     def native_value(self) -> int:
-        return len(self._ingestas())
+        return len(self._meals())
 
     @property
     def extra_state_attributes(self) -> dict:
         dieta = self._todays_dieta() or {}
-        ingestas = self._ingestas()
+        meals = self._meals()
         return {
             "horario": dieta.get("nombreHorario"),
-            "franjas": [i["franja"] for i in ingestas],
+            "franjas": [m["franja"] for m in meals],
+            "comidas": meals,
             "raw": dieta,
         }
 

@@ -24,6 +24,14 @@ cuenta) para confirmar qué rutas existen y qué verbo aceptan.
 - `GET /api/paciente/seguimientos` — lista con `peso`, `imc`, `pesoGrasa`, `porcentajeGrasa`, `pesoMasaMagra`, `pesoAgua`, `perimetroCintura`, `perimetroCinturaUmbilical`, `perimetroCadera`, `createdTimestamp`
 - `GET /api/paciente/dietista`
 
+Cada plato de una `dieta` (p. ej. `dieta.comida`) trae a su vez
+`alimentoCantidades` (ingredientes: `alimento.nombre`, `cantidad`,
+`medidaCasera`) y `superPlato` (`nombre`, `receta`, `comensales`, `rating`,
+`thumbnail`) — confirmado leyendo el componente `PlatoDetail` de la propia
+app (`/(app)/planes/plato.tsx`). El sensor `comidas_hoy` expone todo esto ya
+montado en su atributo `comidas`, y la tarjeta lo muestra desplegable con
+receta e ingredientes.
+
 **Único punto sin confirmar al 100%:** el nombre exacto del campo de fecha
 *dentro* del objeto `cita` (no había forma de verlo sin una respuesta real
 autenticada). El sensor de "Próxima cita" prueba varios nombres candidatos y,
