@@ -15,7 +15,6 @@ attribute.
 from __future__ import annotations
 
 import logging
-import unicodedata
 from datetime import datetime
 from typing import Any
 
@@ -46,8 +45,6 @@ MEAL_SLOT_KEYS = (
     "recena1",
     "recena2",
 )
-
-WEEKDAYS_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
 
 # Every one of these keys was present on a real "plato" object (confirmed
 # against a real API response, not guessed). Units follow the standard
@@ -114,10 +111,6 @@ def _sum_nutrients(nutrient_dicts: list[dict]) -> dict:
 # The "cita" object's own date field was never confirmed against a real
 # response (no test account available) - this is the only best-effort part left.
 CITA_DATE_KEYS = ("fecha", "fechaHora", "fechaCita", "datetime", "date", "inicio")
-
-
-def _strip_accents(text: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
 
 def _first_present(data: Any, keys: tuple[str, ...]) -> Any:
@@ -322,22 +315,27 @@ class DietoProTodayMealsSensor(DietoProEntity):
         return dietas if isinstance(dietas, list) else []
 
     def _todays_dieta_indexed(self) -> tuple[int, dict] | tuple[None, None]:
-        """Returns (index-within-plan.dietas, dieta). The index is needed as
-        the "dieta" field when calling the cambiar_plato action - never
-        confirmed whether the backend actually wants this array index or a
-        weekday number, since every account seen so far only has one dieta
-        (index 0 either way)."""
+        """Returns (index-within-plan.dietas, dieta).
+
+        This used to match today's weekday name against "nombreHorario", but
+        that field turned out to NOT be a weekday at all - it's the work
+        shift name (e.g. "Turno partido"), the same for every day on
+        single-dieta accounts. That's why it never advanced past day 0 for
+        anyone with more than one dieta.
+
+        Tracing the real cambiar_plato mutation confirmed the "dieta" field
+        it takes is a 0-6 weekday index (Monday=0), so that's what dieta
+        selection uses now too - the same index doubles as what the action
+        needs, no separate lookup required. len(dietas) % 7 acts as a safety
+        net in case an account ever has fewer than 7 entries.
+        """
         dietas = self._dietas()
         if not dietas:
             return None, None
         if len(dietas) == 1:
             return 0, dietas[0]
-        today_name = WEEKDAYS_ES[dt_util.now().weekday()]
-        for i, dieta in enumerate(dietas):
-            nombre = _strip_accents(str(dieta.get("nombreHorario") or "")).lower()
-            if today_name in nombre:
-                return i, dieta
-        return 0, dietas[0]
+        index = dt_util.now().weekday() % len(dietas)
+        return index, dietas[index]
 
     def _todays_dieta(self) -> dict | None:
         return self._todays_dieta_indexed()[1]

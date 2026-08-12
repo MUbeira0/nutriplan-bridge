@@ -103,11 +103,9 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
   del atributo `comidas`)
 - `nutriplan_bridge.cambiar_plato` — **modifica tu plan real, no es
   reversible desde HA**. Necesita `plan_id`, `dieta` (el `dieta_index` del
-  sensor `comidas_hoy`), `franja`, `subingesta_id` (el plato a sustituir) y
-  `nuevo_plato_id` (de `opciones_plato`). El campo `dieta` nunca se pudo
-  confirmar al 100% para cuentas con más de una dieta (todas las cuentas
-  vistas mientras se construía esto solo tenían una) — revisa el resultado
-  en la app si tu plan tiene varios horarios.
+  sensor `comidas_hoy` — es el día de la semana, 0=lunes, deducido de la
+  propia llamada a esta acción en la app), `franja`, `subingesta_id` (el
+  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`).
 
 ## Tarjeta
 
@@ -122,6 +120,11 @@ type: custom:nutriplan-bridge-card
 No hace falta registrar ningún recurso a mano ni indicar entidades: la
 integración registra el JS automáticamente y la tarjeta detecta sus propias
 entidades por convención de nombre.
+
+Al desplegar un plato aparecen, además de la receta: estrellas para
+valorarlo (llama a `valorar_plato`) y un botón "🔄 Cambiar plato" que
+consulta `opciones_plato` y, al elegir una alternativa, llama a
+`cambiar_plato` directamente desde la tarjeta.
 
 ## Si algo no encaja con tu cuenta
 

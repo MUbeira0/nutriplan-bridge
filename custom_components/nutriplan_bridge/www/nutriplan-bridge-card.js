@@ -17,9 +17,16 @@
  * dietista_entity: sensor.nutriplan_bridge_dietista
  *
  * The "comidas_hoy" sensor's "comidas" attribute carries, per meal slot:
- * { franja, hora, platos: [{ nombre, receta, comensales, duracion_min, rating,
- *   calorias, alergenos, imagen, ingredientes: [{nombre, cantidad, medida_casera}] }] }
- * (a slot can have more than one plato, e.g. desayuno = coffee + sandwich)
+ * { franja, hora, platos: [{ subingesta_id, plato_id, super_plato_id, nombre,
+ *   receta, comensales, duracion_min, rating, calorias, alergenos, imagen,
+ *   ingredientes: [{nombre, cantidad, medida_casera}] }] }
+ * (a slot can have more than one plato, e.g. desayuno = coffee + sandwich).
+ * plan_id/dieta_index live at the top level of that same attribute set.
+ *
+ * Each plato has a "Cambiar plato" button (calls the nutriplan_bridge.
+ * opciones_plato / cambiar_plato actions) and a 5-star rating control
+ * (nutriplan_bridge.valorar_plato). cambiar_plato mutates the real, live
+ * plan - see api.py's docstring for what is/isn't fully confirmed about it.
  */
 
 const MEAL_LABELS = {
@@ -87,6 +94,8 @@ class NutriplanBridgeCard extends HTMLElement {
   constructor() {
     super();
     this._expanded = new Set();
+    // subingesta_id -> { status: "loading"|"options"|"applying"|"error", options?, franja?, error? }
+    this._changeState = new Map();
     // Attach the shadow root immediately: Lovelace can call setConfig()
     // (e.g. for the "add card" preview) before this element is connected
     // to the document, so connectedCallback is too late and leaves
@@ -189,11 +198,29 @@ class NutriplanBridgeCard extends HTMLElement {
         .metric .value { font-size: 1.15em; color: var(--primary-text-color); }
         .metric .label { font-size: 0.75em; color: var(--secondary-text-color); }
         .unavailable { padding: 8px 0; color: var(--secondary-text-color); }
+        .rating-stars { display: flex; gap: 2px; margin-bottom: 6px; }
+        .rating-stars ha-icon.rating-star {
+          --mdc-icon-size: 18px; color: var(--primary-color); cursor: pointer;
+        }
+        .plato-actions { margin-top: 4px; }
+        .action-btn {
+          font: inherit; font-size: 0.82em; color: var(--primary-color);
+          background: var(--secondary-background-color, rgba(127,127,127,.12));
+          border: none; border-radius: 14px; padding: 6px 12px; margin: 0 6px 6px 0;
+          cursor: pointer;
+        }
+        .action-btn:hover { filter: brightness(0.95); }
+        .action-status { font-size: 0.82em; color: var(--secondary-text-color); }
+        .action-status.error { color: var(--error-color, #c62828); }
+        .opciones-plato { display: flex; flex-wrap: wrap; }
       </style>
       <ha-card>
         <div class="unavailable">Nutriplan Bridge: esperando datos de Home Assistant…</div>
       </ha-card>
     `;
+    // Delegated once on the shadow root (survives ha-card's innerHTML being
+    // replaced on every render) instead of re-attaching listeners each time.
+    this.shadowRoot.addEventListener("click", (ev) => this._handleClick(ev));
   }
 
   _toggle(franja) {
@@ -205,7 +232,139 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
-  _renderPlato(plato) {
+  async _callService(service, data, wantResponse) {
+    const msg = { type: "call_service", domain: "nutriplan_bridge", service, service_data: data };
+    if (wantResponse) msg.return_response = true;
+    const result = await this._hass.connection.sendMessagePromise(msg);
+    return wantResponse ? result?.response ?? result : result;
+  }
+
+  _optionLabel(opt) {
+    if (!opt || typeof opt !== "object") return "Opción";
+    const superPlato = opt.superPlato || opt.super_plato || {};
+    return superPlato.nombre || opt.nombre || opt.name || `Opción #${opt.id ?? "?"}`;
+  }
+
+  _extractOptions(response) {
+    const raw = response && response.opciones;
+    if (Array.isArray(raw)) return raw;
+    if (raw && Array.isArray(raw.data)) return raw.data;
+    if (raw && Array.isArray(raw.items)) return raw.items;
+    return [];
+  }
+
+  async _startCambiarPlato(subingestaId, platoId, franja) {
+    this._changeState.set(subingestaId, { status: "loading" });
+    this._safeRender();
+    try {
+      const response = await this._callService("opciones_plato", { plato_id: platoId, franja }, true);
+      this._changeState.set(subingestaId, { status: "options", options: this._extractOptions(response), franja });
+    } catch (err) {
+      this._changeState.set(subingestaId, { status: "error", error: err.message || String(err), franja });
+    }
+    this._safeRender();
+  }
+
+  async _applyCambiarPlato(subingestaId, nuevoPlatoId) {
+    const prev = this._changeState.get(subingestaId) || {};
+    this._changeState.set(subingestaId, { status: "applying" });
+    this._safeRender();
+    try {
+      await this._callService(
+        "cambiar_plato",
+        {
+          plan_id: this._planId,
+          dieta: this._dietaIndex,
+          franja: prev.franja,
+          subingesta_id: subingestaId,
+          nuevo_plato_id: nuevoPlatoId,
+        },
+        true
+      );
+      this._changeState.delete(subingestaId);
+    } catch (err) {
+      this._changeState.set(subingestaId, { status: "error", error: err.message || String(err), franja: prev.franja });
+    }
+    this._safeRender();
+  }
+
+  async _rateDish(superPlatoId, rating) {
+    try {
+      await this._callService("valorar_plato", { super_plato_id: superPlatoId, rating });
+    } catch (err) {
+      console.error("nutriplan-bridge-card: valorar_plato failed", err);
+    }
+  }
+
+  _handleClick(ev) {
+    const header = ev.target.closest(".meal-header");
+    if (header) {
+      this._toggle(header.dataset.franja);
+      return;
+    }
+    const cambiarBtn = ev.target.closest(".cambiar-btn");
+    if (cambiarBtn) {
+      this._startCambiarPlato(cambiarBtn.dataset.subingesta, cambiarBtn.dataset.platoId, cambiarBtn.dataset.franja);
+      return;
+    }
+    const cancelarBtn = ev.target.closest(".cancelar-btn");
+    if (cancelarBtn) {
+      this._changeState.delete(cancelarBtn.dataset.subingesta);
+      this._safeRender();
+      return;
+    }
+    const opcionBtn = ev.target.closest(".opcion-btn");
+    if (opcionBtn) {
+      this._applyCambiarPlato(opcionBtn.dataset.subingesta, opcionBtn.dataset.nuevoId);
+      return;
+    }
+    const star = ev.target.closest(".rating-star");
+    if (star) {
+      const container = star.closest(".rating-stars");
+      this._rateDish(container.dataset.superPlato, Number(star.dataset.value));
+    }
+  }
+
+  _renderPlatoActions(plato, franja) {
+    const stateKey = plato.subingesta_id;
+    if (stateKey === undefined || stateKey === null) return "";
+    const state = this._changeState.get(stateKey) || { status: "idle" };
+    const dataAttrs = `data-subingesta="${escapeHtml(stateKey)}" data-plato-id="${escapeHtml(
+      plato.plato_id
+    )}" data-franja="${escapeHtml(franja)}"`;
+
+    if (state.status === "loading") {
+      return '<div class="action-status">Buscando alternativas…</div>';
+    }
+    if (state.status === "applying") {
+      return '<div class="action-status">Aplicando cambio…</div>';
+    }
+    if (state.status === "options") {
+      const opts = state.options || [];
+      if (!opts.length) {
+        return `<div class="action-status">Sin alternativas disponibles. <button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
+          stateKey
+        )}">Cerrar</button></div>`;
+      }
+      const buttons = opts
+        .map(
+          (opt) =>
+            `<button class="action-btn opcion-btn" data-subingesta="${escapeHtml(stateKey)}" data-nuevo-id="${escapeHtml(
+              opt.id
+            )}">${escapeHtml(this._optionLabel(opt))}</button>`
+        )
+        .join("");
+      return `<div class="opciones-plato">${buttons}<button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
+        stateKey
+      )}">Cancelar</button></div>`;
+    }
+    if (state.status === "error") {
+      return `<div class="action-status error">${escapeHtml(state.error)}</div><button class="action-btn cambiar-btn" ${dataAttrs}>Reintentar</button>`;
+    }
+    return `<button class="action-btn cambiar-btn" ${dataAttrs}>🔄 Cambiar plato</button>`;
+  }
+
+  _renderPlato(plato, franja) {
     const img = plato.imagen
       ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" onerror="this.style.display='none'" />`
       : "";
@@ -213,8 +372,19 @@ class NutriplanBridgeCard extends HTMLElement {
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
     if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} comensales`);
     if (plato.duracion_min) metaParts.push(`${escapeHtml(plato.duracion_min)} min`);
-    if (plato.rating) metaParts.push(`★ ${Number(plato.rating).toFixed(1)}`);
     const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
+
+    const ratingValue = Math.round(Number(plato.rating) || 0);
+    const starsHtml = plato.super_plato_id
+      ? `<div class="rating-stars" data-super-plato="${escapeHtml(plato.super_plato_id)}">${[1, 2, 3, 4, 5]
+          .map(
+            (n) =>
+              `<ha-icon class="rating-star" data-value="${n}" icon="${
+                n <= ratingValue ? "mdi:star" : "mdi:star-outline"
+              }"></ha-icon>`
+          )
+          .join("")}</div>`
+      : "";
 
     const alergenos =
       plato.alergenos && plato.alergenos.length
@@ -241,9 +411,11 @@ class NutriplanBridgeCard extends HTMLElement {
         <div class="plato-nombre">${escapeHtml(plato.nombre || "Sin especificar")}</div>
         ${img}
         ${meta}
+        ${starsHtml}
         ${alergenos}
         ${receta}
         ${ingredientes}
+        <div class="plato-actions">${this._renderPlatoActions(plato, franja)}</div>
       </div>
     `;
   }
@@ -264,7 +436,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
     let bodyHtml = "";
     if (isOpen) {
-      bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlato(p)).join("")}</div>`;
+      bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlato(p, franja)).join("")}</div>`;
     }
 
     return `
@@ -299,6 +471,10 @@ class NutriplanBridgeCard extends HTMLElement {
       return;
     }
 
+    const mealsAttrs = (mealsEntity && mealsEntity.attributes) || {};
+    this._planId = mealsAttrs.plan_id;
+    this._dietaIndex = mealsAttrs.dieta_index;
+
     const dietistaAttrs = (dietistaEntity && dietistaEntity.attributes) || {};
     const dietistaName =
       dietistaEntity && dietistaEntity.state !== "unknown" ? dietistaEntity.state : "Nutriplan Bridge";
@@ -308,7 +484,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const planName =
       planEntity && planEntity.state !== "unknown" ? planEntity.state : "Sin plan activo";
 
-    const meals = (mealsEntity && mealsEntity.attributes && mealsEntity.attributes.comidas) || [];
+    const meals = mealsAttrs.comidas || [];
     const mealsHtml = meals.length
       ? `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels)).join("")}</div>`
       : '<div class="empty">Sin comidas programadas para hoy</div>';
@@ -374,10 +550,6 @@ class NutriplanBridgeCard extends HTMLElement {
           : ""
       }
     `;
-
-    card.querySelectorAll(".meal-header").forEach((el) => {
-      el.addEventListener("click", () => this._toggle(el.dataset.franja));
-    });
   }
 }
 
@@ -472,6 +644,6 @@ if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
   window.customCards.push({
     type: "nutriplan-bridge-card",
     name: "Nutriplan Bridge",
-    description: "Plan actual, comidas de hoy (con receta e ingredientes), próxima cita y seguimientos.",
+    description: "Plan actual, comidas de hoy (con receta, ingredientes y cambio/valoración de platos), próxima cita y seguimientos.",
   });
 }

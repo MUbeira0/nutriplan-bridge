@@ -240,13 +240,15 @@ class DietoProApiClient:
           on the plato entry in comidas_hoy's "comidas" attribute.
         - new_plato_id: the replacement - "plato_id" on one of the options
           returned by async_get_plato_options().
-        - dieta: index of the target day's dieta within the plan (comidas_hoy
-          exposes this as "dieta_index"). Every account seen while building
-          this integration only has a single dieta (index 0 either way), so
-          it was never possible to confirm whether the backend actually
-          wants an array index or a weekday number for accounts with more
-          than one dieta - this call mutates your live plan, so double check
-          the result in the app after using it on such an account.
+        - dieta: 0-6 weekday index (Monday=0), exposed by comidas_hoy as
+          "dieta_index". Also doubles as the index used to pick which of
+          plan.dietas[] applies to today (see sensor.py's
+          _todays_dieta_indexed) - both derived from this same mutation's
+          "dieta" argument, so they're guaranteed to stay consistent with
+          each other even though this specific field's semantics were only
+          inferred from the decompiled call site, not a real multi-dieta
+          response. This mutates your live plan - double check the result
+          in the app the first time you use it.
         """
         return await self._async_request(
             "PATCH",
