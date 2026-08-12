@@ -111,7 +111,24 @@ class NutriplanBridgeCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._safeRender();
+    // Home Assistant calls this setter on EVERY entity state change in the
+    // whole system, not just this card's entities - re-rendering every
+    // single time (recreating every <img> from scratch, resetting hover/
+    // scroll state) is what made the card visibly jump/flicker. HA keeps a
+    // stable object reference per entity when it hasn't changed, so
+    // comparing references lets us skip the vast majority of these calls
+    // and only actually re-render when something we show has changed.
+    const cfg = this._config || {};
+    const entities = [
+      findEntity(hass, cfg.plan_entity, "_plan_actual"),
+      findEntity(hass, cfg.meals_entity, "_comidas_hoy"),
+      findEntity(hass, cfg.appointment_entity, "_proxima_cita"),
+      findEntity(hass, cfg.tracking_entity, "_seguimientos"),
+      findEntity(hass, cfg.dietista_entity, "_dietista"),
+    ];
+    const changed = !this._lastEntities || entities.some((e, i) => e !== this._lastEntities[i]);
+    this._lastEntities = entities;
+    if (changed) this._safeRender();
   }
 
   getCardSize() {
@@ -183,7 +200,8 @@ class NutriplanBridgeCard extends HTMLElement {
         .plato-block:not(:first-child) { padding-top: 12px; border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
         .plato-nombre { font-size: 0.95em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 6px; }
         .plato-block img {
-          width: 100%; max-height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
+          width: 100%; height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
+          background: var(--secondary-background-color, rgba(127,127,127,.08));
         }
         .meal-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 6px; }
         .meal-alergenos { font-size: 0.76em; color: var(--secondary-text-color); margin-bottom: 6px; }
@@ -202,7 +220,7 @@ class NutriplanBridgeCard extends HTMLElement {
         .rating-stars ha-icon.rating-star {
           --mdc-icon-size: 18px; color: var(--primary-color); cursor: pointer;
         }
-        .plato-actions { margin-top: 4px; }
+        .plato-actions { margin-top: 8px; }
         .action-btn {
           font: inherit; font-size: 0.82em; color: var(--primary-color);
           background: var(--secondary-background-color, rgba(127,127,127,.12));
@@ -210,8 +228,18 @@ class NutriplanBridgeCard extends HTMLElement {
           cursor: pointer;
         }
         .action-btn:hover { filter: brightness(0.95); }
+        .cambiar-btn {
+          font: inherit; font-weight: 500; font-size: 0.88em;
+          color: var(--text-primary-color, #fff);
+          background: var(--primary-color); border: none; border-radius: 20px;
+          padding: 9px 18px; margin: 0 6px 6px 0; cursor: pointer;
+          display: inline-flex; align-items: center; gap: 6px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.2);
+        }
+        .cambiar-btn:hover { filter: brightness(1.08); }
+        .cambiar-btn ha-icon { --mdc-icon-size: 18px; }
         .action-status { font-size: 0.82em; color: var(--secondary-text-color); }
-        .action-status.error { color: var(--error-color, #c62828); }
+        .action-status.error { color: var(--error-color, #c62828); margin-bottom: 6px; }
         .opciones-plato { display: flex; flex-wrap: wrap; }
       </style>
       <ha-card>
@@ -253,11 +281,19 @@ class NutriplanBridgeCard extends HTMLElement {
     return [];
   }
 
+  _withAccount(data) {
+    return this._configEntryId ? { ...data, config_entry_id: this._configEntryId } : data;
+  }
+
   async _startCambiarPlato(subingestaId, platoId, franja) {
     this._changeState.set(subingestaId, { status: "loading" });
     this._safeRender();
     try {
-      const response = await this._callService("opciones_plato", { plato_id: platoId, franja }, true);
+      const response = await this._callService(
+        "opciones_plato",
+        this._withAccount({ plato_id: platoId, franja }),
+        true
+      );
       this._changeState.set(subingestaId, { status: "options", options: this._extractOptions(response), franja });
     } catch (err) {
       this._changeState.set(subingestaId, { status: "error", error: err.message || String(err), franja });
@@ -272,13 +308,13 @@ class NutriplanBridgeCard extends HTMLElement {
     try {
       await this._callService(
         "cambiar_plato",
-        {
+        this._withAccount({
           plan_id: this._planId,
           dieta: this._dietaIndex,
           franja: prev.franja,
           subingesta_id: subingestaId,
           nuevo_plato_id: nuevoPlatoId,
-        },
+        }),
         true
       );
       this._changeState.delete(subingestaId);
@@ -290,7 +326,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
   async _rateDish(superPlatoId, rating) {
     try {
-      await this._callService("valorar_plato", { super_plato_id: superPlatoId, rating });
+      await this._callService("valorar_plato", this._withAccount({ super_plato_id: superPlatoId, rating }));
     } catch (err) {
       console.error("nutriplan-bridge-card: valorar_plato failed", err);
     }
@@ -359,9 +395,11 @@ class NutriplanBridgeCard extends HTMLElement {
       )}">Cancelar</button></div>`;
     }
     if (state.status === "error") {
-      return `<div class="action-status error">${escapeHtml(state.error)}</div><button class="action-btn cambiar-btn" ${dataAttrs}>Reintentar</button>`;
+      return `<div class="action-status error">${escapeHtml(
+        state.error
+      )}</div><button class="cambiar-btn" ${dataAttrs}><ha-icon icon="mdi:refresh"></ha-icon>Reintentar</button>`;
     }
-    return `<button class="action-btn cambiar-btn" ${dataAttrs}>🔄 Cambiar plato</button>`;
+    return `<button class="cambiar-btn" ${dataAttrs}><ha-icon icon="mdi:swap-horizontal"></ha-icon>Cambiar plato</button>`;
   }
 
   _renderPlato(plato, franja) {
@@ -474,6 +512,11 @@ class NutriplanBridgeCard extends HTMLElement {
     const mealsAttrs = (mealsEntity && mealsEntity.attributes) || {};
     this._planId = mealsAttrs.plan_id;
     this._dietaIndex = mealsAttrs.dieta_index;
+    // Needed so the actions below know WHICH configured account a plato
+    // belongs to - without it, calling them with more than one Nutriplan
+    // Bridge account configured fails ("Multiple accounts are configured;
+    // pass config_entry_id to pick one").
+    this._configEntryId = mealsAttrs.config_entry_id;
 
     const dietistaAttrs = (dietistaEntity && dietistaEntity.attributes) || {};
     const dietistaName =

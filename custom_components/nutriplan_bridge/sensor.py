@@ -373,6 +373,7 @@ class DietoProTodayMealsSensor(DietoProEntity):
             "comidas": meals,
             "plan_id": plan.get("id"),
             "dieta_index": dieta_index,
+            "config_entry_id": self._entry.entry_id,
             "raw": dieta,
         }
 

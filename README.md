@@ -122,9 +122,15 @@ integración registra el JS automáticamente y la tarjeta detecta sus propias
 entidades por convención de nombre.
 
 Al desplegar un plato aparecen, además de la receta: estrellas para
-valorarlo (llama a `valorar_plato`) y un botón "🔄 Cambiar plato" que
-consulta `opciones_plato` y, al elegir una alternativa, llama a
-`cambiar_plato` directamente desde la tarjeta.
+valorarlo (llama a `valorar_plato`) y un botón "Cambiar plato" que consulta
+`opciones_plato` y, al elegir una alternativa, llama a `cambiar_plato`
+directamente desde la tarjeta. Si tienes varias cuentas configuradas, la
+tarjeta ya sabe de cuál es cada plato (el sensor `comidas_hoy` expone su
+propio `config_entry_id`) y lo manda solo en cada llamada.
+
+La tarjeta solo se vuelve a pintar cuando cambia alguna de sus propias
+entidades, no en cada actualización de Home Assistant (evita parpadeos y
+saltos al recargar imágenes sin necesidad).
 
 ## Si algo no encaja con tu cuenta
 
