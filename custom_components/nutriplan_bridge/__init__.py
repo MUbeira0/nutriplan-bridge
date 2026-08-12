@@ -88,8 +88,10 @@ def _resolve_coordinator(hass: HomeAssistant, call: ServiceCall) -> DietoProData
         return next(iter(coordinators.values()))
     if not coordinators:
         raise HomeAssistantError("No Nutriplan Bridge account is configured")
+    options = ", ".join(sorted(coordinators))
     raise HomeAssistantError(
-        "Multiple Nutriplan Bridge accounts are configured; pass config_entry_id to pick one"
+        f"Multiple Nutriplan Bridge accounts are configured; pass config_entry_id to pick one "
+        f"(configured: {options})"
     )
 
 

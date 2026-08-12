@@ -96,6 +96,11 @@ class NutriplanBridgeCard extends HTMLElement {
     this._expanded = new Set();
     // subingesta_id -> { status: "loading"|"options"|"applying"|"error", options?, franja?, error? }
     this._changeState = new Map();
+    // Image URLs that failed to load at least once - once known-broken, we
+    // stop even attempting an <img> for them on future renders instead of
+    // re-triggering the same failed request (and its icon-swap flicker)
+    // every time the card re-renders.
+    this._brokenImages = new Set();
     // Attach the shadow root immediately: Lovelace can call setConfig()
     // (e.g. for the "add card" preview) before this element is connected
     // to the document, so connectedCallback is too late and leaves
@@ -249,6 +254,26 @@ class NutriplanBridgeCard extends HTMLElement {
     // Delegated once on the shadow root (survives ha-card's innerHTML being
     // replaced on every render) instead of re-attaching listeners each time.
     this.shadowRoot.addEventListener("click", (ev) => this._handleClick(ev));
+    // "error" on <img> doesn't bubble, so this only works with capture:true.
+    this.shadowRoot.addEventListener("error", (ev) => this._handleImageError(ev), true);
+  }
+
+  _handleImageError(ev) {
+    const img = ev.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    if (img.src) this._brokenImages.add(img.src);
+    if (img.classList.contains("meal-thumb")) {
+      img.replaceWith(
+        Object.assign(document.createElement("ha-icon"), {
+          className: "meal-type",
+          icon: img.dataset.fallbackIcon || "mdi:food",
+        })
+      );
+    } else if (img.classList.contains("avatar")) {
+      img.replaceWith(Object.assign(document.createElement("ha-icon"), { icon: "mdi:food-apple" }));
+    } else {
+      img.style.display = "none";
+    }
   }
 
   _toggle(franja) {
@@ -403,9 +428,10 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _renderPlato(plato, franja) {
-    const img = plato.imagen
-      ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" onerror="this.style.display='none'" />`
-      : "";
+    const img =
+      plato.imagen && !this._brokenImages.has(plato.imagen)
+        ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
+        : "";
     const metaParts = [];
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
     if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} comensales`);
@@ -468,9 +494,10 @@ class NutriplanBridgeCard extends HTMLElement {
       ? platos.map((p) => p.nombre || "Sin especificar").join(" + ")
       : "Sin especificar";
     const thumbSrc = platos.find((p) => p.imagen)?.imagen;
-    const thumbHtml = thumbSrc
-      ? `<img class="meal-thumb" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('ha-icon'),{className:'meal-type',icon:'${icon}'}))" />`
-      : `<ha-icon class="meal-type" icon="${icon}"></ha-icon>`;
+    const thumbHtml =
+      thumbSrc && !this._brokenImages.has(thumbSrc)
+        ? `<img class="meal-thumb" data-fallback-icon="${icon}" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" />`
+        : `<ha-icon class="meal-type" icon="${icon}"></ha-icon>`;
 
     let bodyHtml = "";
     if (isOpen) {
@@ -515,8 +542,12 @@ class NutriplanBridgeCard extends HTMLElement {
     // Needed so the actions below know WHICH configured account a plato
     // belongs to - without it, calling them with more than one Nutriplan
     // Bridge account configured fails ("Multiple accounts are configured;
-    // pass config_entry_id to pick one").
-    this._configEntryId = mealsAttrs.config_entry_id;
+    // pass config_entry_id to pick one"). Prefer the sensor's own attribute
+    // (works on any HA version); fall back to the frontend's entity
+    // registry (hass.entities, only on newer HA) in case that attribute
+    // isn't there yet - e.g. the integration was updated but not restarted.
+    this._configEntryId =
+      mealsAttrs.config_entry_id || hass.entities?.[mealsEntity?.entity_id]?.config_entry_id;
 
     const dietistaAttrs = (dietistaEntity && dietistaEntity.attributes) || {};
     const dietistaName =
@@ -561,9 +592,10 @@ class NutriplanBridgeCard extends HTMLElement {
       }
     }
 
-    const avatarHtml = dietistaAvatar
-      ? `<img class="avatar" src="${escapeHtml(dietistaAvatar)}" alt="${escapeHtml(dietistaName)}" onerror="this.replaceWith(Object.assign(document.createElement('ha-icon'),{icon:'mdi:food-apple'}))" />`
-      : `<ha-icon icon="mdi:food-apple"></ha-icon>`;
+    const avatarHtml =
+      dietistaAvatar && !this._brokenImages.has(dietistaAvatar)
+        ? `<img class="avatar" src="${escapeHtml(dietistaAvatar)}" alt="${escapeHtml(dietistaName)}" />`
+        : `<ha-icon icon="mdi:food-apple"></ha-icon>`;
 
     card.innerHTML = `
       <div class="header">

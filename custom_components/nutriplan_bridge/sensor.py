@@ -257,11 +257,19 @@ class DietoProEntity(CoordinatorEntity[DietoProDataUpdateCoordinator], SensorEnt
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_name = name
+        email = entry.data.get(CONF_EMAIL, "Paciente")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name="Nutriplan Bridge",
+            # Every account used to get the literal same device name
+            # ("Nutriplan Bridge"), so with more than one account configured
+            # HA disambiguated their entity_ids with numeric suffixes
+            # (..._comidas_hoy vs ..._comidas_hoy_2) - the card's
+            # entity-by-suffix auto-detection could then only ever find one
+            # of them. Including the email makes every device (and its
+            # entity_ids) unique from the start.
+            name=f"Nutriplan Bridge ({email})",
             manufacturer="Nutriplan Bridge",
-            model=entry.data.get(CONF_EMAIL, "Paciente"),
+            model=email,
             entry_type="service",
         )
 
