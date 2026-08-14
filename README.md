@@ -105,16 +105,20 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
   reversible desde HA**. Necesita `plan_id`, `dieta` (el `dieta_index` del
   sensor `comidas_hoy` — es el día de la semana, 0=lunes, deducido de la
   propia llamada a esta acción en la app), `franja`, `subingesta_id` (el
-  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`). **Estado:**
-  el `PATCH` en sí está confirmado leyendo el código de la app, pero al
-  probarlo en vivo el servidor de DietoPro devolvió un 500 (error interno
-  suyo, no un simple rechazo) para al menos una combinación plato/franja —
-  puede que el problema esté en algún campo del cuerpo que aún no cuadra
-  del todo, o ser algo puntual de esa cuenta/plato. Si te falla, prueba a
-  hacer el mismo cambio desde la app oficial: si allí también falla, no es
-  cosa de esta integración. Los errores ahora salen cortos y claros en la
-  tarjeta; el detalle técnico completo queda en el registro de Home
-  Assistant (Ajustes → Sistema → Registros).
+  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`).
+
+  **Historial:** la primera versión daba un 500 real (error interno del
+  servidor de DietoPro) al probarla en vivo. Revisando otra vez el código
+  de la mutación se vio que la app convierte `planId`/`dieta` a número
+  explícitamente pero manda `currentId` (el `subingesta_id`) **tal cual**
+  — y ese id es en realidad texto (`"14256879280"`), no un número. Mi
+  código lo forzaba a entero, un tipo distinto al que espera su backend;
+  ya está corregido (`subingesta_id` viaja como texto, `nuevo_plato_id`
+  como número, igual que hace la app). Si te sigue fallando, prueba el
+  mismo cambio desde la app oficial: si allí también falla, no es cosa de
+  esta integración. Los errores salen cortos en la tarjeta; el detalle
+  técnico completo queda en el registro de Home Assistant (Ajustes →
+  Sistema → Registros).
 
 ## Tarjeta
 

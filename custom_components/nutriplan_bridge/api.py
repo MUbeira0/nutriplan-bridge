@@ -226,7 +226,7 @@ class DietoProApiClient:
         return await self._async_request("GET", f"/api/paciente/platos?change={plato_id}&ingesta={franja}")
 
     async def async_change_plato(
-        self, plan_id: Any, dieta: int, franja: str, current_subingesta_id: Any, new_plato_id: Any
+        self, plan_id: int, dieta: int, franja: str, current_subingesta_id: str, new_plato_id: int
     ) -> Any:
         """Swap a dish in the live plan for another one.
 
@@ -235,6 +235,17 @@ class DietoProApiClient:
         {plan_id} with body {"currentId", "platoId", "ingesta", "dieta"} (the
         mutation argument minus "planId", which goes in the URL - literally
         omit(args, ["planId"]) in the app's own code).
+
+        Types matter, not just field names: the app's own code wraps planId
+        and dieta in Number(...) before sending, but passes currentId and
+        platoId through unconverted. A real subingesta "id" is a numeric
+        STRING ("14256879280"), while a real plato "id" (the size/talla
+        variant) is a genuine number - so current_subingesta_id must stay a
+        str and new_plato_id an int, matching what the app itself would
+        naturally send. Sending currentId as a number (this client's first
+        version coerced it) is a plausible cause of a real 500 seen testing
+        this live - DietoPro's backend erroring outright rather than
+        rejecting the request, consistent with a type mismatch.
 
         - current_subingesta_id: the dish being replaced - "subingesta_id"
           on the plato entry in comidas_hoy's "comidas" attribute.

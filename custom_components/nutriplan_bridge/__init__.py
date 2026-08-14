@@ -53,11 +53,21 @@ PLATO_OPTIONS_SCHEMA = vol.Schema(
 CHANGE_PLATO_SCHEMA = vol.Schema(
     {
         **_ENTRY_SCHEMA,
-        vol.Required("plan_id"): vol.Any(cv.positive_int, cv.string),
+        # Types matter here, not just values: the decompiled mutation call
+        # explicitly wraps planId and dieta in Number(...) before sending,
+        # but passes currentId straight through unconverted - and a real
+        # subingesta "id" is confirmed to be a numeric STRING
+        # ("14256879280"), not a number. Coercing it to an int (as this
+        # schema originally did) sends DietoPro's backend a type it doesn't
+        # actually send itself, which is a plausible cause of the 500 seen
+        # testing this live. platoId is likewise sent unconverted, but a
+        # real plato "id" (the size/talla variant) is a genuine number, so
+        # that one stays coerced to int.
+        vol.Required("plan_id"): cv.positive_int,
         vol.Required("dieta"): cv.positive_int,
         vol.Required("franja"): cv.string,
-        vol.Required("subingesta_id"): vol.Any(cv.positive_int, cv.string),
-        vol.Required("nuevo_plato_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("subingesta_id"): cv.string,
+        vol.Required("nuevo_plato_id"): cv.positive_int,
     }
 )
 
