@@ -96,12 +96,34 @@ def _resolve_coordinator(hass: HomeAssistant, call: ServiceCall) -> DietoProData
     )
 
 
+def _friendly_error(action: str, err: Exception) -> HomeAssistantError:
+    """DietoProApiError messages embed up to 200 chars of the raw API
+    response, which is useful in the HA log but unreadable dumped straight
+    into a Lovelace card (a wall of red JSON). Log the full detail here and
+    hand the UI a short, actionable sentence instead. A 500 specifically
+    means DietoPro's OWN server errored processing the request (not that it
+    rejected it with a reason), so that's called out separately - trying
+    the same change in the official app is the fastest way to tell whether
+    it's this integration's payload or a problem on DietoPro's end.
+    """
+    _LOGGER.error("Nutriplan Bridge: %s failed: %s", action, err)
+    if isinstance(err, DietoProAuthError):
+        return HomeAssistantError(f"No se pudo {action}: la sesión con DietoPro no es válida. Revisa el registro de Home Assistant para más detalle.")
+    if "-> 500" in str(err):
+        return HomeAssistantError(
+            f"No se pudo {action}: el servidor de DietoPro ha dado un error interno (no un simple rechazo). "
+            "Prueba la misma acción en la app oficial - si allí también falla, no es un problema de esta "
+            "integración. El detalle técnico está en el registro de Home Assistant."
+        )
+    return HomeAssistantError(f"No se pudo {action}. El detalle técnico está en el registro de Home Assistant.")
+
+
 async def _async_handle_mark_chat_read(hass: HomeAssistant, call: ServiceCall) -> None:
     coordinator = _resolve_coordinator(hass, call)
     try:
         await coordinator.client.async_mark_chat_read()
     except (DietoProApiError, DietoProAuthError) as err:
-        raise HomeAssistantError(str(err)) from err
+        raise _friendly_error("marcar el chat como leído", err) from err
     await coordinator.async_request_refresh()
 
 
@@ -110,7 +132,7 @@ async def _async_handle_rate_dish(hass: HomeAssistant, call: ServiceCall) -> Non
     try:
         await coordinator.client.async_rate_dish(call.data["super_plato_id"], call.data["rating"])
     except (DietoProApiError, DietoProAuthError) as err:
-        raise HomeAssistantError(str(err)) from err
+        raise _friendly_error("valorar el plato", err) from err
     await coordinator.async_request_refresh()
 
 
@@ -150,7 +172,7 @@ async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) ->
     try:
         result = await coordinator.client.async_get_plato_options(call.data["plato_id"], call.data["franja"])
     except (DietoProApiError, DietoProAuthError) as err:
-        raise HomeAssistantError(str(err)) from err
+        raise _friendly_error("buscar alternativas de plato", err) from err
 
     raw_options = _find_item_list(result)
     # Reuse the exact same shaping logic comidas_hoy uses for every plato
@@ -181,7 +203,7 @@ async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> 
             call.data["nuevo_plato_id"],
         )
     except (DietoProApiError, DietoProAuthError) as err:
-        raise HomeAssistantError(str(err)) from err
+        raise _friendly_error("cambiar el plato", err) from err
     await coordinator.async_request_refresh()
     return {"resultado": result}
 

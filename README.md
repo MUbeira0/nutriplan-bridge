@@ -105,7 +105,16 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
   reversible desde HA**. Necesita `plan_id`, `dieta` (el `dieta_index` del
   sensor `comidas_hoy` — es el día de la semana, 0=lunes, deducido de la
   propia llamada a esta acción en la app), `franja`, `subingesta_id` (el
-  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`).
+  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`). **Estado:**
+  el `PATCH` en sí está confirmado leyendo el código de la app, pero al
+  probarlo en vivo el servidor de DietoPro devolvió un 500 (error interno
+  suyo, no un simple rechazo) para al menos una combinación plato/franja —
+  puede que el problema esté en algún campo del cuerpo que aún no cuadra
+  del todo, o ser algo puntual de esa cuenta/plato. Si te falla, prueba a
+  hacer el mismo cambio desde la app oficial: si allí también falla, no es
+  cosa de esta integración. Los errores ahora salen cortos y claros en la
+  tarjeta; el detalle técnico completo queda en el registro de Home
+  Assistant (Ajustes → Sistema → Registros).
 
 ## Tarjeta
 
