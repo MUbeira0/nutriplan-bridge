@@ -53,6 +53,12 @@ const MEAL_ICONS = {
   recena2: "mdi:moon-waning-crescent",
 };
 
+// Mirrors const.py's BASE_URL - the plato_options service response is only
+// camelize()'d server-side (like the app itself does), so any image path
+// on it is still relative and needs the same prefix sensor.py applies to
+// every other image URL this card already shows.
+const DIETOPRO_BASE_URL = "https://dietopro.com";
+
 const ENTITY_FIELDS = [
   { key: "plan_entity", suffix: "_plan_actual", label: "Plan actual" },
   { key: "meals_entity", suffix: "_comidas_hoy", label: "Comidas de hoy" },
@@ -204,10 +210,15 @@ class NutriplanBridgeCard extends HTMLElement {
         .meal-body { padding: 0 14px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
         .plato-block:not(:first-child) { padding-top: 12px; border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
         .plato-nombre { font-size: 0.95em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 6px; }
-        .plato-block img {
+        .plato-block img.plato-img {
           width: 100%; height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
+        }
+        .plato-img-placeholder {
+          width: 100%; height: 160px; border-radius: 8px; margin-bottom: 8px;
+          display: flex; align-items: center; justify-content: center;
           background: var(--secondary-background-color, rgba(127,127,127,.08));
         }
+        .plato-img-placeholder ha-icon { --mdc-icon-size: 40px; color: var(--secondary-text-color); }
         .meal-meta { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78em; color: var(--secondary-text-color); margin-bottom: 6px; }
         .meal-alergenos { font-size: 0.76em; color: var(--secondary-text-color); margin-bottom: 6px; }
         .meal-receta { font-size: 0.88em; color: var(--primary-text-color); white-space: pre-line; margin-bottom: 8px; }
@@ -243,9 +254,27 @@ class NutriplanBridgeCard extends HTMLElement {
         }
         .cambiar-btn:hover { filter: brightness(1.08); }
         .cambiar-btn ha-icon { --mdc-icon-size: 18px; }
-        .action-status { font-size: 0.82em; color: var(--secondary-text-color); }
-        .action-status.error { color: var(--error-color, #c62828); margin-bottom: 6px; }
-        .opciones-plato { display: flex; flex-wrap: wrap; }
+        .action-status { font-size: 0.82em; color: var(--secondary-text-color); margin-bottom: 6px; }
+        .action-status.error { color: var(--error-color, #c62828); }
+        .opciones-header {
+          font-size: 0.78em; text-transform: uppercase; letter-spacing: .03em;
+          color: var(--secondary-text-color); margin: 2px 0 6px 0;
+        }
+        .opciones-plato { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+        .opcion-btn {
+          display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box;
+          font: inherit; font-size: 0.88em; text-align: left; color: var(--primary-text-color);
+          background: var(--secondary-background-color, rgba(127,127,127,.1));
+          border: 1px solid transparent; border-radius: 10px; padding: 8px 12px;
+          cursor: pointer;
+        }
+        .opcion-btn:hover { border-color: var(--primary-color); }
+        .opcion-btn .opcion-thumb {
+          width: 34px; height: 34px; border-radius: 7px; object-fit: cover; flex-shrink: 0;
+        }
+        .opcion-btn ha-icon.opcion-icon {
+          --mdc-icon-size: 20px; color: var(--secondary-text-color); flex-shrink: 0;
+        }
       </style>
       <ha-card>
         <div class="unavailable">Nutriplan Bridge: esperando datos de Home Assistant…</div>
@@ -271,6 +300,13 @@ class NutriplanBridgeCard extends HTMLElement {
       );
     } else if (img.classList.contains("avatar")) {
       img.replaceWith(Object.assign(document.createElement("ha-icon"), { icon: "mdi:food-apple" }));
+    } else if (img.classList.contains("opcion-thumb")) {
+      img.replaceWith(Object.assign(document.createElement("ha-icon"), { className: "opcion-icon", icon: "mdi:food" }));
+    } else if (img.classList.contains("plato-img")) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "plato-img-placeholder";
+      placeholder.innerHTML = '<ha-icon icon="mdi:food"></ha-icon>';
+      img.replaceWith(placeholder);
     } else {
       img.style.display = "none";
     }
@@ -296,6 +332,14 @@ class NutriplanBridgeCard extends HTMLElement {
     if (!opt || typeof opt !== "object") return "Opción";
     const superPlato = opt.superPlato || opt.super_plato || {};
     return superPlato.nombre || opt.nombre || opt.name || `Opción #${opt.id ?? "?"}`;
+  }
+
+  _optionImage(opt) {
+    if (!opt || typeof opt !== "object") return null;
+    const superPlato = opt.superPlato || opt.super_plato || {};
+    const path = superPlato.imagePath || superPlato.thumbnail || opt.imagePath || opt.thumbnail;
+    if (!path) return null;
+    return path.startsWith("http") ? path : `${DIETOPRO_BASE_URL}${path}`;
   }
 
   _extractOptions(response) {
@@ -403,21 +447,25 @@ class NutriplanBridgeCard extends HTMLElement {
     if (state.status === "options") {
       const opts = state.options || [];
       if (!opts.length) {
-        return `<div class="action-status">Sin alternativas disponibles. <button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
+        return `<div class="action-status">Sin alternativas disponibles.</div><button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
           stateKey
-        )}">Cerrar</button></div>`;
+        )}">Cerrar</button>`;
       }
-      const buttons = opts
-        .map(
-          (opt) =>
-            `<button class="action-btn opcion-btn" data-subingesta="${escapeHtml(stateKey)}" data-nuevo-id="${escapeHtml(
-              opt.id
-            )}">${escapeHtml(this._optionLabel(opt))}</button>`
-        )
+      const rows = opts
+        .map((opt) => {
+          const imgSrc = this._optionImage(opt);
+          const thumb =
+            imgSrc && !this._brokenImages.has(imgSrc)
+              ? `<img class="opcion-thumb" src="${escapeHtml(imgSrc)}" alt="" loading="lazy" />`
+              : `<ha-icon class="opcion-icon" icon="mdi:food"></ha-icon>`;
+          return `<button class="opcion-btn" data-subingesta="${escapeHtml(stateKey)}" data-nuevo-id="${escapeHtml(
+            opt.id
+          )}">${thumb}<span>${escapeHtml(this._optionLabel(opt))}</span></button>`;
+        })
         .join("");
-      return `<div class="opciones-plato">${buttons}<button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
+      return `<div class="opciones-header">Elige un plato</div><div class="opciones-plato">${rows}</div><button class="action-btn cancelar-btn" data-subingesta="${escapeHtml(
         stateKey
-      )}">Cancelar</button></div>`;
+      )}">Cancelar</button>`;
     }
     if (state.status === "error") {
       return `<div class="action-status error">${escapeHtml(
@@ -430,8 +478,8 @@ class NutriplanBridgeCard extends HTMLElement {
   _renderPlato(plato, franja) {
     const img =
       plato.imagen && !this._brokenImages.has(plato.imagen)
-        ? `<img src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
-        : "";
+        ? `<img class="plato-img" src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
+        : '<div class="plato-img-placeholder"><ha-icon icon="mdi:food"></ha-icon></div>';
     const metaParts = [];
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
     if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} comensales`);
