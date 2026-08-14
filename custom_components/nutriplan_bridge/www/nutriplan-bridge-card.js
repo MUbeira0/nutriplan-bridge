@@ -23,10 +23,13 @@
  * (a slot can have more than one plato, e.g. desayuno = coffee + sandwich).
  * plan_id/dieta_index live at the top level of that same attribute set.
  *
- * Each plato has a "Cambiar plato" button (calls the nutriplan_bridge.
- * opciones_plato / cambiar_plato actions) and a 5-star rating control
- * (nutriplan_bridge.valorar_plato). cambiar_plato mutates the real, live
- * plan - see api.py's docstring for what is/isn't fully confirmed about it.
+ * Progressive disclosure, mobile-first: a meal expands into a short list of
+ * dish rows (thumbnail + name + kcal); tapping a row expands ITS OWN detail
+ * (recipe, ingredients, "Cambiar plato" and a 5-star rating control) inline
+ * below it, so a 3-dish meal doesn't dump three full recipes on screen at
+ * once. "Cambiar plato" calls nutriplan_bridge.opciones_plato / cambiar_plato,
+ * stars call valorar_plato. cambiar_plato mutates the real, live plan - see
+ * api.py's docstring for what is/isn't fully confirmed about it.
  */
 
 const MEAL_LABELS = {
@@ -100,6 +103,10 @@ class NutriplanBridgeCard extends HTMLElement {
   constructor() {
     super();
     this._expanded = new Set();
+    // subingesta_id of platos whose full detail (recipe, ingredients,
+    // actions) is expanded - collapsed by default so a meal with several
+    // dishes only shows a short, scannable list on first tap (mobile-first).
+    this._platoExpanded = new Set();
     // subingesta_id -> { status: "loading"|"options"|"applying"|"error", options?, franja?, error? }
     this._changeState = new Map();
     // Image URLs that failed to load at least once - once known-broken, we
@@ -143,7 +150,7 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 6;
+    return 4;
   }
 
   static getStubConfig() {
@@ -200,15 +207,30 @@ class NutriplanBridgeCard extends HTMLElement {
         .meal-header .meal-thumb {
           width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;
         }
-        .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); }
-        .meal-header .plato { font-size: 0.92em; color: var(--primary-text-color); flex: 1; }
+        .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); flex-shrink: 0; }
+        .meal-header .plato {
+          font-size: 0.92em; color: var(--primary-text-color); flex: 1;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         .meal-header ha-icon.chevron {
           --mdc-icon-size: 20px; color: var(--secondary-text-color);
-          transition: transform .15s ease;
+          transition: transform .15s ease; flex-shrink: 0;
         }
         .meal-header.expanded ha-icon.chevron { transform: rotate(180deg); }
-        .meal-body { padding: 0 14px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
-        .plato-block:not(:first-child) { padding-top: 12px; border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
+        .meal-body { padding: 0 10px 10px 10px; display: flex; flex-direction: column; gap: 4px; }
+        .plato-row:not(:first-child) { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
+        .plato-summary {
+          display: flex; align-items: center; gap: 10px; padding: 8px 4px;
+          cursor: pointer; user-select: none;
+        }
+        .plato-summary-text { flex: 1; min-width: 0; }
+        .plato-summary-nombre {
+          font-size: 0.88em; color: var(--primary-text-color);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .plato-summary-kcal { font-size: 0.75em; color: var(--secondary-text-color); }
+        ha-icon.chevron.small { --mdc-icon-size: 18px; flex-shrink: 0; }
+        .plato-detail { padding: 0 4px 12px 4px; }
         .plato-nombre { font-size: 0.95em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 6px; }
         .plato-block img.plato-img {
           width: 100%; height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
@@ -407,6 +429,17 @@ class NutriplanBridgeCard extends HTMLElement {
       this._toggle(header.dataset.franja);
       return;
     }
+    const platoToggle = ev.target.closest(".plato-summary");
+    if (platoToggle) {
+      const key = platoToggle.dataset.platoToggle;
+      if (this._platoExpanded.has(key)) {
+        this._platoExpanded.delete(key);
+      } else {
+        this._platoExpanded.add(key);
+      }
+      this._safeRender();
+      return;
+    }
     const cambiarBtn = ev.target.closest(".cambiar-btn");
     if (cambiarBtn) {
       this._startCambiarPlato(cambiarBtn.dataset.subingesta, cambiarBtn.dataset.platoId, cambiarBtn.dataset.franja);
@@ -475,7 +508,7 @@ class NutriplanBridgeCard extends HTMLElement {
     return `<button class="cambiar-btn" ${dataAttrs}><ha-icon icon="mdi:swap-horizontal"></ha-icon>Cambiar plato</button>`;
   }
 
-  _renderPlato(plato, franja) {
+  _renderPlatoDetail(plato, franja) {
     const img =
       plato.imagen && !this._brokenImages.has(plato.imagen)
         ? `<img class="plato-img" src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
@@ -519,8 +552,7 @@ class NutriplanBridgeCard extends HTMLElement {
         : "";
 
     return `
-      <div class="plato-block">
-        <div class="plato-nombre">${escapeHtml(plato.nombre || "Sin especificar")}</div>
+      <div class="plato-detail">
         ${img}
         ${meta}
         ${starsHtml}
@@ -528,6 +560,32 @@ class NutriplanBridgeCard extends HTMLElement {
         ${receta}
         ${ingredientes}
         <div class="plato-actions">${this._renderPlatoActions(plato, franja)}</div>
+      </div>
+    `;
+  }
+
+  _renderPlatoRow(plato, franja) {
+    const key = plato.subingesta_id;
+    const canExpand = key !== undefined && key !== null;
+    const isOpen = canExpand && this._platoExpanded.has(key);
+    const thumbSrc = plato.imagen;
+    const thumbHtml =
+      thumbSrc && !this._brokenImages.has(thumbSrc)
+        ? `<img class="meal-thumb" data-fallback-icon="mdi:food" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" />`
+        : `<ha-icon class="meal-type" icon="mdi:food"></ha-icon>`;
+    const kcal = plato.calorias ? `<div class="plato-summary-kcal">${escapeHtml(plato.calorias)} kcal</div>` : "";
+
+    return `
+      <div class="plato-row">
+        <div class="plato-summary" data-plato-toggle="${escapeHtml(key)}">
+          ${thumbHtml}
+          <div class="plato-summary-text">
+            <div class="plato-summary-nombre">${escapeHtml(plato.nombre || "Sin especificar")}</div>
+            ${kcal}
+          </div>
+          ${canExpand ? `<ha-icon class="chevron small${isOpen ? " expanded" : ""}" icon="mdi:chevron-down"></ha-icon>` : ""}
+        </div>
+        ${isOpen ? this._renderPlatoDetail(plato, franja) : ""}
       </div>
     `;
   }
@@ -549,7 +607,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
     let bodyHtml = "";
     if (isOpen) {
-      bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlato(p, franja)).join("")}</div>`;
+      bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlatoRow(p, franja)).join("")}</div>`;
     }
 
     return `
