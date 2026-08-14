@@ -19,6 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
 from .coordinator import DietoProDataUpdateCoordinator
+from .sensor import _plato_detail
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,13 +114,60 @@ async def _async_handle_rate_dish(hass: HomeAssistant, call: ServiceCall) -> Non
     await coordinator.async_request_refresh()
 
 
+def _find_item_list(data: object) -> list:
+    """The real shape of GET /api/paciente/platos?change=...&ingesta=... was
+    never confirmed against a live response (no test account available), so
+    instead of guessing one specific wrapper key (which turned out to only
+    ever surface a handful of items - almost certainly the wrong nested
+    array, or the wrong key entirely, for at least some accounts), this
+    walks the whole response and returns whichever array looks most like
+    "a list of dishes": most items carrying an "id" field, then longest.
+    """
+    candidates: list[list] = []
+
+    def _visit(value: object) -> None:
+        if isinstance(value, list):
+            candidates.append(value)
+            for item in value:
+                _visit(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                _visit(item)
+
+    _visit(data)
+    if not candidates:
+        return []
+
+    def _score(arr: list) -> tuple[int, int]:
+        with_id = sum(1 for item in arr if isinstance(item, dict) and "id" in item)
+        return (with_id, len(arr))
+
+    return max(candidates, key=_score)
+
+
 async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     coordinator = _resolve_coordinator(hass, call)
     try:
         result = await coordinator.client.async_get_plato_options(call.data["plato_id"], call.data["franja"])
     except (DietoProApiError, DietoProAuthError) as err:
         raise HomeAssistantError(str(err)) from err
-    return {"opciones": result}
+
+    raw_options = _find_item_list(result)
+    # Reuse the exact same shaping logic comidas_hoy uses for every plato
+    # (adds absolute image URLs, nutrientes, structured ingredientes...) so
+    # the card can render an option's full detail with the same code it
+    # already uses for today's meals, instead of duplicating guesswork.
+    raw_options = [opt for opt in raw_options if isinstance(opt, dict)]
+    options = [_plato_detail({"plato": opt}) for opt in raw_options]
+    # cambiar_plato's "platoId" is confirmed to be this option's own
+    # top-level "id" (traced from the actual mutation call site - see
+    # api.py). _plato_detail() normally reads "plato_id" from the same
+    # place when its input really is plato-shaped, but force it from the
+    # raw item directly so selecting an option still works even if that
+    # assumption about the response shape turns out to be wrong.
+    for shaped, raw in zip(options, raw_options):
+        shaped["plato_id"] = raw.get("id", shaped.get("plato_id"))
+    return {"opciones": options}
 
 
 async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:

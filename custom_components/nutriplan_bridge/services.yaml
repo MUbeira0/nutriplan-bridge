@@ -50,8 +50,10 @@ opciones_plato:
   name: Ver opciones de plato
   description: >-
     Lista los platos alternativos disponibles para sustituir uno concreto en
-    una franja horaria. Solo lectura, no cambia nada. Usa el resultado para
-    elegir el "nuevo_plato_id" de la acción "cambiar_plato".
+    una franja horaria, ya formateados igual que los platos del sensor
+    comidas_hoy (nombre, receta, ingredientes, imagen...). Solo lectura, no
+    cambia nada. Usa el "plato_id" de la opción elegida como
+    "nuevo_plato_id" de la acción "cambiar_plato".
   fields:
     config_entry_id:
       name: Cuenta

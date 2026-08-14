@@ -124,8 +124,12 @@ entidades por convención de nombre.
 Pensada para móvil: al desplegar una comida solo se ve una lista corta
 (foto pequeña + nombre + kcal por plato); tocando un plato concreto se abre
 su detalle completo (receta, ingredientes, alérgenos, estrellas para
-valorarlo con `valorar_plato`, y el botón "Cambiar plato" que consulta
-`opciones_plato` y aplica el cambio con `cambiar_plato`). Así una comida con
+valorarlo con `valorar_plato`). El botón "Cambiar plato" consulta
+`opciones_plato` y muestra **todas** las alternativas (el backend busca la
+lista dentro de la respuesta y descarta arrays más pequeños que puedan
+colar antes, en vez de asumir una clave fija) — cada opción es también
+desplegable, con su propia receta e ingredientes, y solo se aplica al
+pulsar "Aceptar este plato" (llama a `cambiar_plato`). Así una comida con
 varios platos no vuelca tres recetas enteras de golpe en la pantalla. Si
 tienes varias cuentas configuradas, la tarjeta ya sabe de cuál es cada plato
 (el sensor `comidas_hoy` expone su propio `config_entry_id`) y lo manda solo
