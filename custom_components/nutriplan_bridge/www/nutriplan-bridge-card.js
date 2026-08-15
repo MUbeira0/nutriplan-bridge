@@ -376,6 +376,7 @@ class NutriplanBridgeCard extends HTMLElement {
         options: this._extractOptions(response),
         expandedOptionId: null,
         franja,
+        platoId,
       });
     } catch (err) {
       this._changeState.set(subingestaId, { status: "error", error: err.message || String(err), franja });
@@ -394,7 +395,7 @@ class NutriplanBridgeCard extends HTMLElement {
           plan_id: this._planId,
           dieta: this._dietaIndex,
           franja: prev.franja,
-          subingesta_id: subingestaId,
+          plato_actual_id: prev.platoId,
           nuevo_plato_id: nuevoPlatoId,
         }),
         true

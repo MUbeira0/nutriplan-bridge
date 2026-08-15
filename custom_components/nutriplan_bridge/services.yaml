@@ -124,11 +124,11 @@ cambiar_plato:
       required: true
       selector:
         text:
-    subingesta_id:
+    plato_actual_id:
       name: ID del plato a sustituir
       description: >-
-        El "subingesta_id" del plato que se va a reemplazar, del atributo
-        "comidas" del sensor comidas_hoy.
+        El "plato_id" (no el subingesta_id) del plato que se va a reemplazar,
+        del atributo "comidas" del sensor comidas_hoy.
       required: true
       selector:
         text:

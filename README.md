@@ -104,20 +104,36 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
 - `nutriplan_bridge.cambiar_plato` — **modifica tu plan real, no es
   reversible desde HA**. Necesita `plan_id`, `dieta` (el `dieta_index` del
   sensor `comidas_hoy` — es el día de la semana, 0=lunes, deducido de la
-  propia llamada a esta acción en la app), `franja`, `subingesta_id` (el
-  plato a sustituir) y `nuevo_plato_id` (de `opciones_plato`).
+  propia llamada a esta acción en la app), `franja`, `plato_actual_id` (el
+  `plato_id` del plato a sustituir, no su `subingesta_id`) y
+  `nuevo_plato_id` (de `opciones_plato`).
 
   **Historial:** la primera versión daba un 500 real (error interno del
-  servidor de DietoPro) al probarla en vivo. Revisando otra vez el código
-  de la mutación se vio que la app convierte `planId`/`dieta` a número
-  explícitamente pero manda `currentId` (el `subingesta_id`) **tal cual**
-  — y ese id es en realidad texto (`"14256879280"`), no un número. También
-  se vio en vivo que alguna opción venía sin `id` utilizable, lo que
-  rompía la validación con un error críptico ("expected int..."). Ambos
-  casos ya están corregidos (tipos correctos, opciones sin id descartadas,
-  y validación propia con mensajes claros en vez de dejar que falle la
-  validación en bruto). Si te sigue fallando, prueba el mismo cambio desde
-  la app oficial: si allí también falla, no es cosa de esta integración.
+  servidor de DietoPro) al probarla en vivo, y tras corregir eso pasó a
+  "funcionar" sin error pero sin cambiar nunca el plato de verdad (ni en
+  Home Assistant ni en la app oficial). Las dos causas, encontradas
+  retrocediendo otra vez sobre el código de la mutación:
+  1. La app convierte `planId`/`dieta` a número explícitamente pero manda
+     `currentId` tal cual - se asumió que `currentId` era el `subingesta_id`
+     (texto, tipo `"14256879280"`), corregido para que viajara como texto.
+  2. **Ese supuesto era incorrecto de raíz**: rastreando el punto exacto
+     donde la app arma la llamada (dos sitios distintos en el código
+     decompilado, `ChangePlatoOptionsContainer` y
+     `ChangePlatoPreviewModal`, coinciden) se ve que `currentId` en
+     realidad **nunca** es el `subingesta_id` — es el propio `plato_id`
+     (número) del plato que se está sustituyendo, el mismo identificador
+     que ya se usa para pedir alternativas en `opciones_plato`. Al mandar
+     el `subingesta_id`, DietoPro no encontraba ningún plato que
+     coincidiera y simplemente no hacía nada, sin dar ningún error. Ya
+     corregido: el campo se llama `plato_actual_id` y espera el `plato_id`,
+     no el `subingesta_id`.
+
+  También se vio en vivo que alguna opción venía sin `id` utilizable, lo
+  que rompía la validación con un error críptico ("expected int...").
+  Corregido (opciones sin id descartadas, y validación propia con mensajes
+  claros en vez de dejar que falle la validación en bruto). Si te sigue
+  fallando, prueba el mismo cambio desde la app oficial: si allí también
+  falla, no es cosa de esta integración.
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 

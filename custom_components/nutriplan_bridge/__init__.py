@@ -55,8 +55,8 @@ CHANGE_PLATO_SCHEMA = vol.Schema(
         **_ENTRY_SCHEMA,
         # Deliberately untyped here (Voluptuous accepts anything): the
         # exact required types are documented in api.py's async_change_plato
-        # (currentId/subingesta_id must stay a string, dieta/plan_id/platoId
-        # are numbers), but enforcing that at the schema level means a bad
+        # (currentId/plato_actual_id and dieta/plan_id/platoId are all
+        # numbers), but enforcing that at the schema level means a bad
         # value raises a raw, unhandled voluptuous error ("expected int for
         # dictionary value @ ...") straight in the card - seen live when one
         # option in a real response had no usable id. That's now filtered
@@ -69,7 +69,7 @@ CHANGE_PLATO_SCHEMA = vol.Schema(
         vol.Required("plan_id"): object,
         vol.Required("dieta"): object,
         vol.Required("franja"): cv.string,
-        vol.Required("subingesta_id"): object,
+        vol.Required("plato_actual_id"): object,
         vol.Required("nuevo_plato_id"): object,
     }
 )
@@ -238,10 +238,10 @@ async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> 
     plan_id = _require_int(call, "plan_id", "ID del plan")
     dieta = _require_int(call, "dieta", "Índice de la dieta")
     franja = _require_str(call, "franja", "Franja")
-    subingesta_id = _require_str(call, "subingesta_id", "ID del plato a sustituir")
+    plato_actual_id = _require_int(call, "plato_actual_id", "ID del plato actual")
     nuevo_plato_id = _require_int(call, "nuevo_plato_id", "ID del nuevo plato")
     try:
-        result = await coordinator.client.async_change_plato(plan_id, dieta, franja, subingesta_id, nuevo_plato_id)
+        result = await coordinator.client.async_change_plato(plan_id, dieta, franja, plato_actual_id, nuevo_plato_id)
     except (DietoProApiError, DietoProAuthError) as err:
         raise _friendly_error("cambiar el plato", err) from err
     await coordinator.async_request_refresh()

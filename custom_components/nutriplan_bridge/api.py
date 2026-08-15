@@ -226,29 +226,32 @@ class DietoProApiClient:
         return await self._async_request("GET", f"/api/paciente/platos?change={plato_id}&ingesta={franja}")
 
     async def async_change_plato(
-        self, plan_id: int, dieta: int, franja: str, current_subingesta_id: str, new_plato_id: int
+        self, plan_id: int, dieta: int, franja: str, current_plato_id: int, new_plato_id: int
     ) -> Any:
         """Swap a dish in the live plan for another one.
 
         Confirmed by tracing the actual useChangePlatoMutation() call site in
-        the decompiled ChangePlatoOptions screen: PATCH /api/paciente/plans/
-        {plan_id} with body {"currentId", "platoId", "ingesta", "dieta"} (the
-        mutation argument minus "planId", which goes in the URL - literally
-        omit(args, ["planId"]) in the app's own code).
+        the decompiled ChangePlatoOptions/ChangePlatoPreviewModal screens:
+        PATCH /api/paciente/plans/{plan_id} with body {"currentId", "platoId",
+        "ingesta", "dieta"} (the mutation argument minus "planId", which goes
+        in the URL - literally omit(args, ["planId"]) in the app's own code).
 
-        Types matter, not just field names: the app's own code wraps planId
-        and dieta in Number(...) before sending, but passes currentId and
-        platoId through unconverted. A real subingesta "id" is a numeric
-        STRING ("14256879280"), while a real plato "id" (the size/talla
-        variant) is a genuine number - so current_subingesta_id must stay a
-        str and new_plato_id an int, matching what the app itself would
-        naturally send. Sending currentId as a number (this client's first
-        version coerced it) is a plausible cause of a real 500 seen testing
-        this live - DietoPro's backend erroring outright rather than
-        rejecting the request, consistent with a type mismatch.
+        "currentId" is NOT the subingesta id - an earlier version of this
+        client assumed that and it's wrong, which is why cambiar_plato used
+        to report success but never actually change anything (in HA or the
+        official app): the request reached DietoPro fine, it just never
+        matched any dish to replace. Traced twice, from two different call
+        sites, both agree: "currentId" is Number(the CURRENT dish's own
+        "plato" id) - the exact same identifier already used as "platoId" in
+        async_get_plato_options() to look up alternatives for that dish, not
+        the subingesta wrapper's id. One call site builds it from
+        Number(route param "platoId") (ChangePlatoOptionsContainer), the
+        other straight from the current plato object's own ".id"
+        (ChangePlatoPreviewModal) - same value either way.
 
-        - current_subingesta_id: the dish being replaced - "subingesta_id"
-          on the plato entry in comidas_hoy's "comidas" attribute.
+        - current_plato_id: the CURRENT dish's own "plato_id" (same field
+          used for async_get_plato_options's plato_id argument), not
+          "subingesta_id".
         - new_plato_id: the replacement - "plato_id" on one of the options
           returned by async_get_plato_options().
         - dieta: 0-6 weekday index (Monday=0), exposed by comidas_hoy as
@@ -265,7 +268,7 @@ class DietoProApiClient:
             "PATCH",
             f"/api/paciente/plans/{plan_id}",
             json={
-                "currentId": current_subingesta_id,
+                "currentId": current_plato_id,
                 "platoId": new_plato_id,
                 "ingesta": franja,
                 "dieta": dieta,
