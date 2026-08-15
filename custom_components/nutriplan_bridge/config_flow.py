@@ -37,7 +37,8 @@ class DietoProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await client.async_login()
             except DietoProAuthError:
                 errors["base"] = "invalid_auth"
-            except DietoProApiError:
+            except DietoProApiError as err:
+                _LOGGER.error("Nutriplan Bridge: could not reach dietopro.com: %s", err)
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Unexpected error during DietoPro login")

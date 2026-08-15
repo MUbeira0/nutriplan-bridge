@@ -12,7 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -317,7 +317,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except DietoProAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
     except DietoProApiError as err:
-        raise ConfigEntryAuthFailed(str(err)) from err
+        # A network/connectivity failure is not the same as bad credentials -
+        # ConfigEntryAuthFailed would trigger HA's reauth flow (asking to
+        # re-enter the password) for what might just be a temporary outage.
+        # ConfigEntryNotReady makes HA retry setup automatically instead.
+        raise ConfigEntryNotReady(str(err)) from err
 
     interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     coordinator = DietoProDataUpdateCoordinator(hass, client, interval)
