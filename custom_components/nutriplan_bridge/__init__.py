@@ -253,12 +253,25 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     regardless of how many accounts are configured."""
     global _card_registered, _services_registered
     if not _card_registered:
-        www_dir = Path(__file__).parent / "www"
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False)]
-        )
-        add_extra_js_url(hass, f"{CARD_URL_PATH}?v={_integration_version()}")
-        _card_registered = True
+        try:
+            www_dir = Path(__file__).parent / "www"
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False)]
+            )
+            add_extra_js_url(hass, f"{CARD_URL_PATH}?v={_integration_version()}")
+            _card_registered = True
+        except Exception:  # noqa: BLE001
+            # Registering the card must never take the rest of the
+            # integration down with it (sensors/services should still work
+            # even if this fails) - but a silent failure here is exactly
+            # what made someone have to add the resource by hand instead of
+            # it "just working". Log it loudly and tell them the fallback.
+            _LOGGER.exception(
+                "Nutriplan Bridge: could not auto-register the Lovelace card. "
+                "Add it manually instead: Settings -> Dashboards -> Resources -> "
+                "Add resource -> URL '%s', type 'JavaScript Module'.",
+                CARD_URL_PATH,
+            )
 
     if not _services_registered:
 

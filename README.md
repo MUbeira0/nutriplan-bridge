@@ -135,6 +135,18 @@ No hace falta registrar ningún recurso a mano ni indicar entidades: la
 integración registra el JS automáticamente y la tarjeta detecta sus propias
 entidades por convención de nombre.
 
+**Si aun así no aparece sola** (le pasó a alguien: los sensores funcionaban
+pero el recurso no se registraba solo): el `manifest.json` no declaraba que
+esta integración depende de `frontend`, así que Home Assistant no
+garantizaba que ese componente ya estuviera listo cuando intentaba
+registrar el script — según el orden de arranque, podía fallar en
+silencio. Ya está declarado como dependencia (v0.20.0+). Si aun con eso
+falla, ahora queda registrado como error en el log de Home Assistant en
+vez de fallar callado, y puedes añadirlo a mano como alternativa: Ajustes →
+Panel de control → Recursos → Añadir recurso → URL
+`/nutriplan_bridge_files/nutriplan-bridge-card.js` → tipo "Módulo de
+JavaScript".
+
 Pensada para móvil: al desplegar una comida solo se ve una lista corta
 (foto pequeña + nombre + kcal por plato); tocando un plato concreto se abre
 su detalle completo (receta, ingredientes, alérgenos, estrellas para
