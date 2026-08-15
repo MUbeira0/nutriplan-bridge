@@ -201,8 +201,16 @@ class NutriplanBridgeCard extends HTMLElement {
           display: flex; align-items: center; gap: 8px; padding: 8px 12px;
           cursor: pointer; user-select: none;
         }
-        .meal-header ha-icon.meal-type { --mdc-icon-size: 18px; color: var(--primary-color); flex-shrink: 0; }
-        .meal-header .meal-thumb {
+        /* Also not scoped to .meal-header for the same reason as .meal-thumb
+           below: this is the fallback icon shown in place of a broken/missing
+           thumbnail in any row, not just the meal header. */
+        ha-icon.meal-type { --mdc-icon-size: 18px; color: var(--primary-color); flex-shrink: 0; }
+        /* Not scoped to .meal-header: this class is reused for the small
+           thumbnail in every plato/option row too. Scoping it to
+           ".meal-header .meal-thumb" only meant those other thumbnails had
+           NO size limit at all and rendered at the source photo's native
+           resolution - fine for a small image, huge for a high-res one. */
+        .meal-thumb {
           width: 28px; height: 28px; border-radius: 6px; object-fit: cover; flex-shrink: 0;
         }
         .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); flex-shrink: 0; }
