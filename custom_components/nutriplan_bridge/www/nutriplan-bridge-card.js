@@ -207,7 +207,7 @@ class NutriplanBridgeCard extends HTMLElement {
         }
         .meal-header .franja { font-size: 0.72em; color: var(--secondary-text-color); flex-shrink: 0; }
         .meal-header .plato {
-          font-size: 0.92em; color: var(--primary-text-color); flex: 1;
+          font-size: 0.92em; color: var(--primary-text-color); flex: 1; min-width: 0;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .meal-header ha-icon.chevron {
@@ -488,14 +488,23 @@ class NutriplanBridgeCard extends HTMLElement {
               })
               .join("")}</ul>`
           : "";
+      // Belt-and-suspenders: the backend already drops options with no
+      // usable id (one slipped through in a real response and produced an
+      // empty "Aceptar" value, which failed cambiar_plato's validation
+      // before it could even show a friendly error), but never render a
+      // selectable button for one here either, just in case.
+      const acceptBtn =
+        optionId !== undefined && optionId !== null
+          ? `<button class="cambiar-btn opcion-aceptar" data-subingesta="${escapeHtml(
+              subingestaId
+            )}" data-nuevo-id="${escapeHtml(optionId)}"><ha-icon icon="mdi:check"></ha-icon>Aceptar este plato</button>`
+          : '<div class="action-status">Esta opción no se puede seleccionar (falta información).</div>';
       detail = `
         <div class="plato-detail">
           ${alergenos}
           ${receta}
           ${ingredientes}
-          <button class="cambiar-btn opcion-aceptar" data-subingesta="${escapeHtml(
-            subingestaId
-          )}" data-nuevo-id="${escapeHtml(optionId)}"><ha-icon icon="mdi:check"></ha-icon>Aceptar este plato</button>
+          ${acceptBtn}
         </div>
       `;
     }

@@ -199,6 +199,13 @@ async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) ->
     # assumption about the response shape turns out to be wrong.
     for shaped, raw in zip(options, raw_options):
         shaped["plato_id"] = raw.get("id", shaped.get("plato_id"))
+    # A real response hit while testing this live included at least one
+    # entry with no usable id at all - shipping it let the card build a
+    # "select" button with an empty value, which then failed cambiar_plato's
+    # schema validation (a raw voluptuous error, bypassing _friendly_error
+    # entirely since it happens before the handler even runs). An option
+    # with no id can never be selected anyway, so drop it here instead.
+    options = [opt for opt in options if isinstance(opt.get("plato_id"), int)]
     return {"opciones": options}
 
 
