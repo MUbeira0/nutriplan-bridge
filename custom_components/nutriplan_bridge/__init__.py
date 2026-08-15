@@ -53,21 +53,24 @@ PLATO_OPTIONS_SCHEMA = vol.Schema(
 CHANGE_PLATO_SCHEMA = vol.Schema(
     {
         **_ENTRY_SCHEMA,
-        # Types matter here, not just values: the decompiled mutation call
-        # explicitly wraps planId and dieta in Number(...) before sending,
-        # but passes currentId straight through unconverted - and a real
-        # subingesta "id" is confirmed to be a numeric STRING
-        # ("14256879280"), not a number. Coercing it to an int (as this
-        # schema originally did) sends DietoPro's backend a type it doesn't
-        # actually send itself, which is a plausible cause of the 500 seen
-        # testing this live. platoId is likewise sent unconverted, but a
-        # real plato "id" (the size/talla variant) is a genuine number, so
-        # that one stays coerced to int.
-        vol.Required("plan_id"): cv.positive_int,
-        vol.Required("dieta"): cv.positive_int,
+        # Deliberately untyped here (Voluptuous accepts anything): the
+        # exact required types are documented in api.py's async_change_plato
+        # (currentId/subingesta_id must stay a string, dieta/plan_id/platoId
+        # are numbers), but enforcing that at the schema level means a bad
+        # value raises a raw, unhandled voluptuous error ("expected int for
+        # dictionary value @ ...") straight in the card - seen live when one
+        # option in a real response had no usable id. That's now filtered
+        # out server-side too (see _async_handle_plato_options), but schema
+        # validation runs before any of this integration's own code does,
+        # so it can never route through _friendly_error - hence validating
+        # by hand in _async_handle_change_plato() instead, where a bad value
+        # (e.g. a stale card that hasn't picked up that filter yet) always
+        # produces a clear, actionable message rather than a crash.
+        vol.Required("plan_id"): object,
+        vol.Required("dieta"): object,
         vol.Required("franja"): cv.string,
-        vol.Required("subingesta_id"): cv.string,
-        vol.Required("nuevo_plato_id"): cv.positive_int,
+        vol.Required("subingesta_id"): object,
+        vol.Required("nuevo_plato_id"): object,
     }
 )
 
@@ -126,6 +129,27 @@ def _friendly_error(action: str, err: Exception) -> HomeAssistantError:
             "integración. El detalle técnico está en el registro de Home Assistant."
         )
     return HomeAssistantError(f"No se pudo {action}. El detalle técnico está en el registro de Home Assistant.")
+
+
+def _require_int(call: ServiceCall, key: str, label: str) -> int:
+    value = call.data.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HomeAssistantError(
+            f'El campo "{label}" no es un número válido ({value!r}). '
+            "Cierra y vuelve a abrir \"Cambiar plato\" para refrescar las opciones e inténtalo de nuevo."
+        ) from None
+
+
+def _require_str(call: ServiceCall, key: str, label: str) -> str:
+    value = call.data.get(key)
+    if value in (None, ""):
+        raise HomeAssistantError(
+            f'Falta el campo "{label}". '
+            "Cierra y vuelve a abrir \"Cambiar plato\" para refrescar las opciones e inténtalo de nuevo."
+        )
+    return str(value)
 
 
 async def _async_handle_mark_chat_read(hass: HomeAssistant, call: ServiceCall) -> None:
@@ -211,14 +235,13 @@ async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) ->
 
 async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     coordinator = _resolve_coordinator(hass, call)
+    plan_id = _require_int(call, "plan_id", "ID del plan")
+    dieta = _require_int(call, "dieta", "Índice de la dieta")
+    franja = _require_str(call, "franja", "Franja")
+    subingesta_id = _require_str(call, "subingesta_id", "ID del plato a sustituir")
+    nuevo_plato_id = _require_int(call, "nuevo_plato_id", "ID del nuevo plato")
     try:
-        result = await coordinator.client.async_change_plato(
-            call.data["plan_id"],
-            call.data["dieta"],
-            call.data["franja"],
-            call.data["subingesta_id"],
-            call.data["nuevo_plato_id"],
-        )
+        result = await coordinator.client.async_change_plato(plan_id, dieta, franja, subingesta_id, nuevo_plato_id)
     except (DietoProApiError, DietoProAuthError) as err:
         raise _friendly_error("cambiar el plato", err) from err
     await coordinator.async_request_refresh()

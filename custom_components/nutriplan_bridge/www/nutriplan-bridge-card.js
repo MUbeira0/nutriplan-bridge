@@ -233,9 +233,9 @@ class NutriplanBridgeCard extends HTMLElement {
         }
         ha-icon.chevron.small.expanded { transform: rotate(180deg); }
         .plato-detail { padding: 0 4px 12px 4px; }
-        .plato-nombre { font-size: 0.95em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 6px; }
-        .plato-block img.plato-img {
+        img.plato-img {
           width: 100%; height: 160px; object-fit: cover; border-radius: 8px; margin-bottom: 8px;
+          display: block;
         }
         .plato-img-placeholder {
           width: 100%; height: 160px; border-radius: 8px; margin-bottom: 8px;

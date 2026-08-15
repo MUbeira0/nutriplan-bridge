@@ -111,14 +111,15 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
   servidor de DietoPro) al probarla en vivo. Revisando otra vez el código
   de la mutación se vio que la app convierte `planId`/`dieta` a número
   explícitamente pero manda `currentId` (el `subingesta_id`) **tal cual**
-  — y ese id es en realidad texto (`"14256879280"`), no un número. Mi
-  código lo forzaba a entero, un tipo distinto al que espera su backend;
-  ya está corregido (`subingesta_id` viaja como texto, `nuevo_plato_id`
-  como número, igual que hace la app). Si te sigue fallando, prueba el
-  mismo cambio desde la app oficial: si allí también falla, no es cosa de
-  esta integración. Los errores salen cortos en la tarjeta; el detalle
-  técnico completo queda en el registro de Home Assistant (Ajustes →
-  Sistema → Registros).
+  — y ese id es en realidad texto (`"14256879280"`), no un número. También
+  se vio en vivo que alguna opción venía sin `id` utilizable, lo que
+  rompía la validación con un error críptico ("expected int..."). Ambos
+  casos ya están corregidos (tipos correctos, opciones sin id descartadas,
+  y validación propia con mensajes claros en vez de dejar que falle la
+  validación en bruto). Si te sigue fallando, prueba el mismo cambio desde
+  la app oficial: si allí también falla, no es cosa de esta integración.
+  Los errores salen cortos en la tarjeta; el detalle técnico completo
+  queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
 ## Tarjeta
 
