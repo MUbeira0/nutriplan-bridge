@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+import re
+from datetime import date, timedelta
 
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
@@ -12,19 +14,71 @@ from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 _LOGGER = logging.getLogger(__name__)
 
 
-def _pick_current_plan_id(plans: list) -> object | None:
-    """Mirror the app's own fallback logic (decompiled from getPlan's queryFn):
-    among plans that were sent by email, take the most recent one; otherwise
-    just take the first plan in the list.
+_TITLE_DATE_RE = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})")
+_PLAN_START_KEYS = ("startDate", "fechaInicio", "inicio", "start", "fechaDesde", "desde")
+
+
+def plan_start_date(plan: dict) -> date | None:
+    """The day a plan starts applying.
+
+    A plan's "created"/"sentByEmailAt" are when the dietitian wrote/sent it,
+    which is usually BEFORE it takes effect (a plan titled "12/10/2026" is
+    typically sent days earlier). The title carries the real start date
+    ("Plan dietético semanal de X 12/10/2026"), so: an explicit start field if
+    the API ever sends one, else the dd/mm/yyyy in the title, else the
+    creation date.
     """
+    for key in _PLAN_START_KEYS:
+        parsed = _as_date(plan.get(key))
+        if parsed:
+            return parsed
+    match = _TITLE_DATE_RE.search(str(plan.get("title") or ""))
+    if match:
+        day, month, year = (int(g) for g in match.groups())
+        try:
+            return date(year, month, day)
+        except ValueError:
+            pass
+    return _as_date(plan.get("created"))
+
+
+def _as_date(value: object) -> date | None:
+    if not value:
+        return None
+    parsed = dt_util.parse_datetime(str(value))
+    if parsed is not None:
+        return parsed.date()
+    return dt_util.parse_date(str(value))
+
+
+def _pick_current_plan_id(plans: list) -> object | None:
+    """The plan that applies TODAY: among the plans already sent to the
+    patient, the one with the latest start date that is not in the future.
+
+    The previous logic ("most recently sent") picked next week's plan as soon
+    as it was sent, days before it took effect. If nothing has started yet,
+    fall back to the soonest upcoming one; if no plan has a usable date, to
+    the app's own fallback (latest sent, else the first in the list).
+    """
+    plans = [p for p in plans if isinstance(p, dict) and p.get("id") is not None]
     if not plans:
         return None
-    sent = [p for p in plans if isinstance(p, dict) and p.get("sentByEmailAt")]
-    if sent:
-        sent.sort(key=lambda p: p["sentByEmailAt"], reverse=True)
-        return sent[0].get("id")
-    first = plans[0]
-    return first.get("id") if isinstance(first, dict) else None
+    sent = [p for p in plans if p.get("sentByEmailAt")] or plans
+
+    today = dt_util.now().date()
+    dated = [(plan_start_date(p), p) for p in sent]
+    dated = [(d, p) for d, p in dated if d is not None]
+    if dated:
+        started = [(d, p) for d, p in dated if d <= today]
+        if started:
+            return max(started, key=lambda item: (item[0], str(item[1].get("sentByEmailAt") or "")))[1]["id"]
+        return min(dated, key=lambda item: item[0])[1]["id"]
+
+    with_sent = [p for p in plans if p.get("sentByEmailAt")]
+    if with_sent:
+        with_sent.sort(key=lambda p: p["sentByEmailAt"], reverse=True)
+        return with_sent[0]["id"]
+    return plans[0]["id"]
 
 
 class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):

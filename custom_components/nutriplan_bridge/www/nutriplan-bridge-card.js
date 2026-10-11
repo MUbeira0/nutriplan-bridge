@@ -82,7 +82,7 @@ function formatShortDate(iso) {
 
 function planLabel(plan) {
   if (!plan) return "Plan";
-  return plan.titulo || formatShortDate(plan.enviado || plan.creado) || `Plan ${plan.id}`;
+  return plan.titulo || formatShortDate(plan.inicio || plan.enviado || plan.creado) || `Plan ${plan.id}`;
 }
 
 function sparkline(values) {
@@ -949,10 +949,10 @@ class NutriplanBridgeCard extends HTMLElement {
       planNavHtml = `
         <div class="plan-nav">
           <button class="nav-btn" ${older ? `data-plan-id="${escapeHtml(older.id)}"` : "disabled"} title="Plan anterior"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-          <div class="plan-name">${escapeHtml(planLabel(viewedPlan))} <small>${viewingCurrent ? "(actual)" : `· ${escapeHtml(formatShortDate(viewedPlan && (viewedPlan.enviado || viewedPlan.creado)))}`}</small></div>
+          <div class="plan-name">${escapeHtml(planLabel(viewedPlan))} <small>${viewingCurrent ? "(actual)" : `· ${escapeHtml(formatShortDate(viewedPlan && (viewedPlan.inicio || viewedPlan.enviado || viewedPlan.creado)))}`}</small></div>
           <button class="nav-btn" ${newer ? `data-plan-id="${escapeHtml(newerTarget)}"` : "disabled"} title="Plan siguiente"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
         </div>
-        ${viewingCurrent ? "" : '<div class="readonly-note">Plan anterior: solo lectura. <button class="link-btn">Volver al plan actual</button></div>'}
+        ${viewingCurrent ? "" : '<div class="readonly-note">Estás viendo otro plan: solo lectura. <button class="link-btn">Volver al plan actual</button></div>'}
       `;
     }
 

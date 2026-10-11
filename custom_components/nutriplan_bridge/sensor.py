@@ -28,7 +28,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import BASE_URL, DOMAIN
-from .coordinator import DietoProDataUpdateCoordinator
+from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -265,21 +265,25 @@ def shape_day(index: int, dieta: Any) -> dict:
 
 
 def plan_summaries(plans: Any) -> list[dict]:
-    """Compact list of every plan the patient has (newest first) so the card
-    can offer going back to previous plans."""
+    """Compact list of every plan the patient has (newest start date first)
+    so the card can offer going back to previous plans."""
     if not isinstance(plans, list):
         return []
-    out = [
-        {
-            "id": p.get("id"),
-            "titulo": p.get("title"),
-            "creado": p.get("created"),
-            "enviado": p.get("sentByEmailAt"),
-        }
-        for p in plans
-        if isinstance(p, dict) and p.get("id") is not None
-    ]
-    out.sort(key=lambda p: str(p.get("enviado") or p.get("creado") or ""), reverse=True)
+    out = []
+    for p in plans:
+        if not isinstance(p, dict) or p.get("id") is None:
+            continue
+        start = plan_start_date(p)
+        out.append(
+            {
+                "id": p.get("id"),
+                "titulo": p.get("title"),
+                "creado": p.get("created"),
+                "enviado": p.get("sentByEmailAt"),
+                "inicio": start.isoformat() if start else None,
+            }
+        )
+    out.sort(key=lambda p: (p.get("inicio") or "", str(p.get("enviado") or "")), reverse=True)
     return out
 
 
@@ -358,6 +362,7 @@ class DietoProCurrentPlanSensor(DietoProEntity):
             "plan_id": plan.get("id"),
             "creado": plan.get("created"),
             "enviado_por_email": plan.get("sentByEmailAt"),
+            "inicio": (plan_start_date(plan).isoformat() if plan and plan_start_date(plan) else None),
             "total_planes": len(plans) if isinstance(plans, list) else 0,
             "planes": plan_summaries(plans),
             "num_dietas": len(plan.get("dietas") or []) if plan.get("dietas") else 0,
