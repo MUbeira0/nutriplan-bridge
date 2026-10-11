@@ -1,0 +1,47 @@
+blueprint:
+  name: Nutriplan Bridge - Aviso antes de cada comida
+  description: >-
+    Ejecuta una acción (por ejemplo, una notificación al móvil) un rato antes
+    de cada comida de tu plan. Usa el calendario "Comidas" de la integración.
+    En la acción puedes usar {{ meal }} (p. ej. "Comida: Lasaña + ...") y
+    {{ kcal }}.
+  domain: automation
+  source_url: https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/meal_reminder.yaml
+  input:
+    meals_calendar:
+      name: Calendario de comidas
+      selector:
+        entity:
+          filter:
+            - integration: nutriplan_bridge
+              domain: calendar
+    offset:
+      name: Antelación
+      description: >-
+        Formato horas:minutos:segundos con signo menos para "antes" (por
+        defecto 10 minutos antes). Con 0:0:0 avisa justo a la hora.
+      default: "-0:10:0"
+      selector:
+        text:
+    notify_action:
+      name: Acción a ejecutar
+      description: Por ejemplo, un servicio notify.mobile_app_... con el mensaje.
+      selector:
+        action: {}
+
+mode: queued
+max_exceeded: silent
+
+trigger:
+  - platform: calendar
+    event: start
+    offset: !input offset
+    entity_id: !input meals_calendar
+
+variables:
+  meal: "{{ trigger.calendar_event.summary }}"
+  kcal: "{{ trigger.calendar_event.description or '' }}"
+
+action:
+  - choose: []
+    default: !input notify_action

@@ -1,0 +1,13 @@
+language: "es"
+intents:
+  NutriplanNextMeal:
+    data:
+      - sentences:
+          - "(qué|que) toca comer"
+          - "(qué|que) (me )?toca (de )?comer (ahora|hoy)"
+          - "(cuál|cual) es mi próxima comida"
+  NutriplanCalories:
+    data:
+      - sentences:
+          - "(cuántas|cuantas) calorías (tengo|me tocan) hoy"
+          - "(cuántas|cuantas) calorías tiene mi plan de hoy"

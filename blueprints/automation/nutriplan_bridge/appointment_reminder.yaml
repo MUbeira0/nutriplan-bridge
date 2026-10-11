@@ -1,0 +1,41 @@
+blueprint:
+  name: Nutriplan Bridge - Recordatorio de cita con el dietista
+  description: >-
+    Ejecuta una acción un rato antes de tu cita con el dietista (calendario
+    "Citas" de la integración). En la acción puedes usar {{ cita }}.
+  domain: automation
+  source_url: https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/appointment_reminder.yaml
+  input:
+    appointments_calendar:
+      name: Calendario de citas
+      selector:
+        entity:
+          filter:
+            - integration: nutriplan_bridge
+              domain: calendar
+    offset:
+      name: Antelación
+      description: Formato horas:minutos:segundos con signo menos (por defecto 1 hora antes).
+      default: "-1:0:0"
+      selector:
+        text:
+    notify_action:
+      name: Acción a ejecutar
+      selector:
+        action: {}
+
+mode: single
+
+trigger:
+  - platform: calendar
+    event: start
+    offset: !input offset
+    entity_id: !input appointments_calendar
+
+variables:
+  cita: "{{ trigger.calendar_event.summary }}"
+  inicio: "{{ trigger.calendar_event.start }}"
+
+action:
+  - choose: []
+    default: !input notify_action

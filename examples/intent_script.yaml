@@ -1,0 +1,20 @@
+# Copia esto en tu configuration.yaml (o un paquete) y copia
+# examples/custom_sentences/es/nutriplan.yaml a <config>/custom_sentences/es/.
+# Sustituye TU_EMAIL por el trozo que lleva tu entity_id, p. ej.
+# sensor.nutriplan_bridge_miguel_gmail_com_proxima_comida
+intent_script:
+  NutriplanNextMeal:
+    speech:
+      text: >-
+        {% set e = 'sensor.nutriplan_bridge_TU_EMAIL_proxima_comida' %}
+        {% if states(e) in ['unknown', 'unavailable', 'Nada más hoy'] %}
+          Hoy no te quedan más comidas.
+        {% else %}
+          Toca {{ states(e) }} a las {{ state_attr(e, 'hora') }}:
+          {{ state_attr(e, 'platos') | join(' y ') }}.
+        {% endif %}
+  NutriplanCalories:
+    speech:
+      text: >-
+        {% set e = 'sensor.nutriplan_bridge_TU_EMAIL_calorias_de_hoy' %}
+        Tu plan de hoy tiene {{ states(e) }} calorías.

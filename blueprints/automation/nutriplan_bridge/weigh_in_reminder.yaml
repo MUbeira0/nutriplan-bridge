@@ -1,0 +1,40 @@
+blueprint:
+  name: Nutriplan Bridge - Recordatorio de pesarte
+  description: >-
+    A la hora indicada, si la integración marca la medición como pendiente
+    (más de 7 días sin registrar el peso), ejecuta una acción. Úsalo para
+    enviarte un aviso al móvil.
+  domain: automation
+  source_url: https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/weigh_in_reminder.yaml
+  input:
+    due_sensor:
+      name: Sensor "Medición pendiente"
+      selector:
+        entity:
+          filter:
+            - integration: nutriplan_bridge
+              domain: binary_sensor
+    at_time:
+      name: Hora del aviso
+      default: "09:00:00"
+      selector:
+        time: {}
+    notify_action:
+      name: Acción a ejecutar
+      selector:
+        action: {}
+
+mode: single
+
+trigger:
+  - platform: time
+    at: !input at_time
+
+condition:
+  - condition: state
+    entity_id: !input due_sensor
+    state: "on"
+
+action:
+  - choose: []
+    default: !input notify_action

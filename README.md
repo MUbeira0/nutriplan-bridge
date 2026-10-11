@@ -77,6 +77,12 @@ hace falta.
 
 ## Instalación
 
+**Con HACS (recomendado):** HACS → Integraciones → ⋮ → *Repositorios
+personalizados* → pega `https://github.com/MUbeira0/nutriplan-bridge` con
+categoría *Integración* → Descargar → reinicia Home Assistant.
+
+**A mano:**
+
 1. Copia la carpeta `custom_components/nutriplan_bridge` de este repo a
    `<config>/custom_components/nutriplan_bridge` de tu instalación de Home
    Assistant.
@@ -264,3 +270,47 @@ Cada sensor expone el JSON crudo de la API en el atributo `raw`
 (Herramientas para desarrolladores → Estados). Si algún estado sale vacío o
 distinto a lo esperado, copia ese `raw` para poder ajustar el parseo con
 datos reales.
+
+## Todas las entidades
+
+| Plataforma | Entidades |
+|---|---|
+| sensor | plan actual, comidas de hoy, próxima cita, seguimientos, dietista, mensajes sin leer, mi perfil, encuesta inicial, valoraciones, charlas |
+| sensor (numéricos) | peso, IMC, grasa corporal, masa magra, perímetro de cintura, calorías / proteínas / grasas / hidratos / fibra de hoy, próxima comida, objetivo calórico, peso objetivo, peso hasta el objetivo, variación de peso 30 días, días desde la última medición |
+| binary_sensor | mensajes pendientes, cita en 24 h, plan nuevo pendiente, medición pendiente |
+| calendar | comidas, citas |
+| todo | lista de la compra del plan |
+| button | actualizar ahora, marcar chat como leído |
+
+Eventos del bus: `nutriplan_bridge_plan_changed`, `nutriplan_bridge_new_message`,
+`nutriplan_bridge_appointment_changed`.
+
+## Blueprints
+
+Importables desde Ajustes → Automatizaciones → Blueprints → Importar (pega la URL):
+
+- Aviso antes de cada comida:
+  `https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/meal_reminder.yaml`
+- Recordatorio de cita:
+  `https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/appointment_reminder.yaml`
+- Recordatorio de pesarte:
+  `https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/weigh_in_reminder.yaml`
+- Aviso de plan nuevo o mensaje del dietista:
+  `https://github.com/MUbeira0/nutriplan-bridge/blob/master/blueprints/automation/nutriplan_bridge/new_plan_notify.yaml`
+
+## Voz
+
+`examples/` trae frases y un `intent_script` de ejemplo: "¿qué toca comer?" y
+"¿cuántas calorías tengo hoy?".
+
+## Desarrollo
+
+```bash
+pip install homeassistant pytest
+python -m pytest -q
+```
+
+Los tests (`tests/`) cubren la elección del plan, el índice de día, el cliente
+HTTP (con una sesión simulada), los sensores, calendarios, la lista de la
+compra y las acciones. GitHub Actions ejecuta además `hassfest` y la
+validación de HACS en cada push.
