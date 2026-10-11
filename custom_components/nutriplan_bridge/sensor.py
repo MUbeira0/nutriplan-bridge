@@ -576,7 +576,8 @@ class DietoProNextAppointmentSensor(DietoProEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"raw": self._cita()}
+        cita = self._cita() or {}
+        return {"cita_id": cita.get("id"), "raw": cita or None}
 
     _unrecorded_attributes = frozenset({"raw"})
 
@@ -1223,3 +1224,36 @@ class DietoProDerivedSensor(DietoProEntity):
             return self._func(self.coordinator.data or {})
         except (TypeError, ValueError, KeyError):
             return None
+
+
+def normalize_slots(data: Any) -> list[dict]:
+    """Free slots as a flat list of {fecha, hora, ...}.
+
+    The exact response shape of available-slots is only known from the
+    app's code (it reads "slots"), not from a real response, so this accepts
+    the plausible layouts: {date: [times]}, {date: [{time, ...}]} or a flat
+    list of {date, time} objects - and always keeps what it could not map.
+    """
+    slots = data.get("slots") if isinstance(data, dict) else data
+    out: list[dict] = []
+
+    def add(fecha: Any, item: Any) -> None:
+        if isinstance(item, dict):
+            hora = _first_present(item, ("time", "hora", "start", "from", "startTime"))
+            fecha = _first_present(item, ("date", "fecha", "day")) or fecha
+            entry = {"fecha": fecha, "hora": hora}
+            extra = {k: v for k, v in item.items() if k not in ("time", "hora", "start", "from", "startTime", "date", "fecha", "day")}
+            if extra:
+                entry["extra"] = extra
+            out.append(entry)
+        else:
+            out.append({"fecha": fecha, "hora": item})
+
+    if isinstance(slots, dict):
+        for fecha, items in slots.items():
+            for item in items if isinstance(items, list) else [items]:
+                add(fecha, item)
+    elif isinstance(slots, list):
+        for item in slots:
+            add(None, item)
+    return [slot for slot in out if slot.get("hora") is not None]

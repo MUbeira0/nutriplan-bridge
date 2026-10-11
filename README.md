@@ -99,7 +99,7 @@ Esto crea 10 entidades bajo un dispositivo "Nutriplan Bridge":
 `sensor.nutriplan_bridge_mi_perfil`, `sensor.nutriplan_bridge_estado_eni`,
 `sensor.nutriplan_bridge_valoraciones`, `sensor.nutriplan_bridge_charlas`.
 
-Y seis acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
 - `nutriplan_bridge.obtener_comidas` (solo lectura: todos los días de un plan,
   el actual o uno anterior pasando `plan_id`, con comidas y resumen
   nutricional de cada día; es lo que usa la tarjeta para navegar)
@@ -148,6 +148,30 @@ Y seis acciones (Herramientas de desarrollo → Acciones, o en automatizaciones)
   falla, no es cosa de esta integración.
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
+
+## Novedades 0.26 (rastreadas en la app oficial v51.0.0)
+
+Contratos sacados del bundle decompilado de la app (no inventados):
+
+- `nutriplan_bridge.enviar_mensaje` (`texto`): escribe al dietista
+  (`POST chat/messages {text}`).
+- `nutriplan_bridge.citas_disponibles` (`desde`, `hasta`): solo lectura, huecos
+  libres (`GET citas/available-slots?from=&to=`; por defecto 7 días).
+- `nutriplan_bridge.solicitar_cita` (`fecha`, `hora`, `nota`): pide cita en un
+  hueco (`POST citas/booking-request {date, time, note}`).
+- `nutriplan_bridge.confirmar_cita` / `cancelar_cita` (`cita_id`, por defecto
+  la de la próxima cita; `POST citas/{id}/confirm|cancel`).
+
+**Estas acciones escriben en tu cuenta real y tu dietista lo ve.** La tarjeta
+pide confirmación antes de pedir o cancelar una cita. Lo que no se pudo
+confirmar sin una respuesta real: la forma exacta de la lista de huecos (se
+aceptan varias, y el JSON original va en `raw`) y si `confirm` se usa para
+citas propuestas por el dietista. Registrar el peso **no** está: en la app es
+un asistente por pasos (`seguimientos/{id}/step` y `finish/seguimiento`) cuyo
+punto de partida no se puede deducir sin datos reales.
+
+En la tarjeta: caja para escribir al dietista (icono de mensajes), y botones
+"Pedir cita" (elige día y hora, nota opcional) y "Cancelar cita".
 
 ## Novedades 0.24
 

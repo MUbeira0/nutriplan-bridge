@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.26.0
+- Acciones sacadas de la app oficial v51: `enviar_mensaje`, `citas_disponibles`, `solicitar_cita`, `confirmar_cita`, `cancelar_cita`.
+- Tarjeta: escribir al dietista, pedir y cancelar cita (con confirmación).
+- Sensor Próxima cita expone `cita_id`; el chat se pide con `limit=30` como hace la app.
+- 57 tests. Licencia MIT.
+
 ## 0.25.0
 - Tests automáticos (43) y CI: pytest + hassfest + validación de HACS.
 - Blueprints: aviso antes de cada comida, recordatorio de cita, recordatorio de pesarte, aviso de plan nuevo/mensaje.

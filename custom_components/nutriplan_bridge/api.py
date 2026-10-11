@@ -32,6 +32,14 @@ Confirmed from the decompiled RTK Query API slice (+ live route/verb checks):
   request/response body assumed to follow gesdinet/jwt-refresh-token-bundle
   defaults since no authenticated session was available to confirm it. If it
   ever stops working the client transparently falls back to a full re-login.
+- GET  /api/paciente/chat/messages?limit=N[&beforeId=] -> {"messages": [...],
+  "has_more": bool}; each message carries "created" and its text
+- POST /api/paciente/chat/messages  body {"text": "..."} -> send a chat message
+- GET  /api/paciente/citas/available-slots?from=YYYY-MM-DD&to=YYYY-MM-DD
+  -> {"slots": ...}, the free appointment slots (the app asks for 7 days)
+- POST /api/paciente/citas/booking-request  body {"date", "time", "note"?}
+- POST /api/paciente/citas/{id}/confirm  and  /cancel  (no body)
+  (all five traced from the app version 51.0.0 decompiled bundle)
 - "/api/paciente/pagos" was guessed from the useGetPagosQuery hook name but
   does not exist (verified live: 404), so payments are NOT implemented.
 
@@ -207,7 +215,7 @@ class DietoProApiClient:
         return await self._async_request("GET", "/api/paciente/chat/unread")
 
     async def async_get_chat_messages(self) -> Any:
-        return await self._async_request("GET", "/api/paciente/chat/messages")
+        return await self._async_request("GET", "/api/paciente/chat/messages?limit=30")
 
     async def async_mark_chat_read(self) -> Any:
         return await self._async_request("PUT", "/api/paciente/chat/reset-unread")
@@ -281,3 +289,27 @@ class DietoProApiClient:
                 "dieta": dieta,
             },
         )
+
+    # --- Write endpoints (change your real DietoPro account) --------------------
+    async def async_send_message(self, text: str) -> Any:
+        """Send a chat message to the dietitian."""
+        return await self._async_request("POST", "/api/paciente/chat/messages", json={"text": text})
+
+    async def async_get_available_slots(self, date_from: str, date_to: str) -> Any:
+        """Free appointment slots between two ISO dates (read-only)."""
+        return await self._async_request(
+            "GET", f"/api/paciente/citas/available-slots?from={date_from}&to={date_to}"
+        )
+
+    async def async_request_booking(self, date: str, time: str, note: str | None = None) -> Any:
+        """Ask for an appointment at a given free slot (date YYYY-MM-DD, time as listed by the slots)."""
+        body: dict[str, Any] = {"date": date, "time": time}
+        if note:
+            body["note"] = note
+        return await self._async_request("POST", "/api/paciente/citas/booking-request", json=body)
+
+    async def async_confirm_cita(self, cita_id: Any) -> Any:
+        return await self._async_request("POST", f"/api/paciente/citas/{cita_id}/confirm")
+
+    async def async_cancel_cita(self, cita_id: Any) -> Any:
+        return await self._async_request("POST", f"/api/paciente/citas/{cita_id}/cancel")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 import voluptuous as vol
@@ -16,11 +17,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady,
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.util import dt as dt_util
 
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
 from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
-from .sensor import _plato_detail, shape_day, shopping_list
+from .sensor import _plato_detail, normalize_slots, shape_day, shopping_list
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +34,11 @@ SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
 SERVICE_GET_MEALS = "obtener_comidas"
 SERVICE_SHOPPING = "lista_compra"
+SERVICE_SEND_MESSAGE = "enviar_mensaje"
+SERVICE_SLOTS = "citas_disponibles"
+SERVICE_BOOK = "solicitar_cita"
+SERVICE_CONFIRM_CITA = "confirmar_cita"
+SERVICE_CANCEL_CITA = "cancelar_cita"
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -61,6 +68,23 @@ GET_MEALS_SCHEMA = vol.Schema(
         vol.Optional("plan_id"): vol.Any(cv.positive_int, cv.string),
     }
 )
+
+SEND_MESSAGE_SCHEMA = vol.Schema({**_ENTRY_SCHEMA, vol.Required("texto"): vol.All(cv.string, vol.Length(min=1, max=2000))})
+
+SLOTS_SCHEMA = vol.Schema(
+    {**_ENTRY_SCHEMA, vol.Optional("desde"): cv.date, vol.Optional("hasta"): cv.date}
+)
+
+BOOK_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("fecha"): cv.date,
+        vol.Required("hora"): cv.string,
+        vol.Optional("nota"): cv.string,
+    }
+)
+
+CITA_ID_SCHEMA = vol.Schema({**_ENTRY_SCHEMA, vol.Optional("cita_id"): vol.Any(cv.positive_int, cv.string)})
 
 SHOPPING_SCHEMA = vol.Schema(
     {
@@ -327,6 +351,72 @@ async def _async_handle_shopping(hass: HomeAssistant, call: ServiceCall) -> Serv
     }
 
 
+async def _async_handle_send_message(hass: HomeAssistant, call: ServiceCall) -> None:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        await coordinator.client.async_send_message(call.data["texto"])
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("enviar el mensaje", err) from err
+    await coordinator.async_request_refresh()
+
+
+async def _async_handle_slots(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    start = call.data.get("desde") or dt_util.now().date()
+    end = call.data.get("hasta") or start + timedelta(days=6)
+    try:
+        raw = await coordinator.client.async_get_available_slots(start.isoformat(), end.isoformat())
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("consultar los huecos libres", err) from err
+    slots = normalize_slots(raw)
+    return {"desde": start.isoformat(), "hasta": end.isoformat(), "total": len(slots), "huecos": slots, "raw": raw}
+
+
+async def _async_handle_book(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        result = await coordinator.client.async_request_booking(
+            call.data["fecha"].isoformat(), call.data["hora"], call.data.get("nota")
+        )
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("solicitar la cita", err) from err
+    await coordinator.async_request_refresh()
+    return {"resultado": result}
+
+
+def _cita_id(coordinator: DietoProDataUpdateCoordinator, call: ServiceCall) -> object:
+    cita_id = call.data.get("cita_id")
+    if cita_id is None:
+        wrapper = (coordinator.data or {}).get("cita")
+        cita = wrapper.get("cita") if isinstance(wrapper, dict) else None
+        cita_id = cita.get("id") if isinstance(cita, dict) else None
+    if cita_id is None:
+        raise HomeAssistantError("No hay ninguna cita pendiente (indica cita_id si quieres otra).")
+    return cita_id
+
+
+async def _async_handle_confirm_cita(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    cita_id = _cita_id(coordinator, call)
+    try:
+        result = await coordinator.client.async_confirm_cita(cita_id)
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("confirmar la cita", err) from err
+    await coordinator.async_request_refresh()
+    return {"cita_id": cita_id, "resultado": result}
+
+
+async def _async_handle_cancel_cita(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    cita_id = _cita_id(coordinator, call)
+    try:
+        result = await coordinator.client.async_cancel_cita(cita_id)
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("cancelar la cita", err) from err
+    await coordinator.async_request_refresh()
+    return {"cita_id": cita_id, "resultado": result}
+
+
 async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     coordinator = _resolve_coordinator(hass, call)
     plan_id = _require_int(call, "plan_id", "ID del plan")
@@ -381,6 +471,21 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _get_meals(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_get_meals(hass, call)
 
+        async def _send_message(call: ServiceCall) -> None:
+            await _async_handle_send_message(hass, call)
+
+        async def _slots(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_slots(hass, call)
+
+        async def _book(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_book(hass, call)
+
+        async def _confirm_cita(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_confirm_cita(hass, call)
+
+        async def _cancel_cita(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_cancel_cita(hass, call)
+
         async def _shopping(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_shopping(hass, call)
 
@@ -402,6 +507,19 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             _get_meals,
             schema=GET_MEALS_SCHEMA,
             supports_response=SupportsResponse.ONLY,
+        )
+        hass.services.async_register(DOMAIN, SERVICE_SEND_MESSAGE, _send_message, schema=SEND_MESSAGE_SCHEMA)
+        hass.services.async_register(
+            DOMAIN, SERVICE_SLOTS, _slots, schema=SLOTS_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_BOOK, _book, schema=BOOK_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_CONFIRM_CITA, _confirm_cita, schema=CITA_ID_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_CANCEL_CITA, _cancel_cita, schema=CITA_ID_SCHEMA, supports_response=SupportsResponse.ONLY
         )
         hass.services.async_register(
             DOMAIN,

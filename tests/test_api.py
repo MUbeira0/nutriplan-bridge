@@ -38,6 +38,7 @@ class FakeSession:
 
     def request(self, method, url, **kw):
         self.calls.append((method, url))
+        self.last_kwargs = kw
         return self.responses.pop(0)
 
 
@@ -117,3 +118,38 @@ def test_connection_error_is_wrapped():
     c = api.DietoProApiClient(Boom(), "a", "b")
     with pytest.raises(api.DietoProApiError):
         run(c.async_login())
+
+
+def test_send_message_posts_text_json():
+    c, session = client([LOGIN_OK, FakeResp(200, {"id": 1})])
+    run(c.async_send_message("hola"))
+    assert session.calls[-1] == ("POST", "https://dietopro.com/api/paciente/chat/messages")
+    assert session.last_kwargs["json"] == {"text": "hola"}
+
+
+def test_available_slots_query_string():
+    c, session = client([LOGIN_OK, FakeResp(200, {"slots": {}})])
+    run(c.async_get_available_slots("2026-10-12", "2026-10-18"))
+    assert session.calls[-1] == (
+        "GET",
+        "https://dietopro.com/api/paciente/citas/available-slots?from=2026-10-12&to=2026-10-18",
+    )
+
+
+def test_booking_body_and_optional_note():
+    c, session = client([LOGIN_OK, FakeResp(200, {}), FakeResp(200, {})])
+    run(c.async_request_booking("2026-10-13", "17:30"))
+    assert session.last_kwargs["json"] == {"date": "2026-10-13", "time": "17:30"}
+    run(c.async_request_booking("2026-10-13", "17:30", "gracias"))
+    assert session.last_kwargs["json"] == {"date": "2026-10-13", "time": "17:30", "note": "gracias"}
+    assert session.calls[-1] == ("POST", "https://dietopro.com/api/paciente/citas/booking-request")
+
+
+def test_confirm_and_cancel_paths():
+    c, session = client([LOGIN_OK, FakeResp(200, {}), FakeResp(200, {})])
+    run(c.async_confirm_cita(7))
+    run(c.async_cancel_cita(7))
+    assert session.calls[-2:] == [
+        ("POST", "https://dietopro.com/api/paciente/citas/7/confirm"),
+        ("POST", "https://dietopro.com/api/paciente/citas/7/cancel"),
+    ]

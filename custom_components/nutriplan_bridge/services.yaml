@@ -201,3 +201,134 @@ lista_compra:
       selector:
         entity:
           domain: todo
+
+enviar_mensaje:
+  name: Enviar mensaje al dietista
+  description: >-
+    Envía un mensaje de chat a tu dietista. IMPORTANTE: escribe en tu cuenta
+    real de DietoPro y tu dietista lo verá.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    texto:
+      name: Mensaje
+      description: Texto a enviar (máximo 2000 caracteres).
+      required: true
+      selector:
+        text:
+          multiline: true
+
+citas_disponibles:
+  name: Ver huecos libres para cita
+  description: >-
+    Solo lectura. Devuelve los huecos libres para pedir cita entre dos fechas
+    (por defecto, los próximos 7 días).
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    desde:
+      name: Desde
+      description: Primer día (por defecto, hoy).
+      required: false
+      selector:
+        date:
+    hasta:
+      name: Hasta
+      description: Último día (por defecto, 6 días después de "desde").
+      required: false
+      selector:
+        date:
+
+solicitar_cita:
+  name: Solicitar cita
+  description: >-
+    Pide una cita en un hueco libre (usa los datos de "citas_disponibles").
+    IMPORTANTE: crea una solicitud real en tu cuenta de DietoPro.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    fecha:
+      name: Fecha
+      description: Día del hueco elegido.
+      required: true
+      selector:
+        date:
+    hora:
+      name: Hora
+      description: Hora del hueco, tal y como la devuelve "citas_disponibles" (p. ej. 17:30).
+      required: true
+      selector:
+        text:
+    nota:
+      name: Nota
+      description: Comentario opcional para el dietista.
+      required: false
+      selector:
+        text:
+          multiline: true
+
+confirmar_cita:
+  name: Confirmar cita
+  description: >-
+    Confirma una cita propuesta por el dietista. Sin "cita_id" usa la de la
+    próxima cita. IMPORTANTE: cambia tu cuenta real de DietoPro.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    cita_id:
+      name: ID de la cita
+      description: Opcional; por defecto, el "cita_id" del sensor Próxima cita.
+      required: false
+      selector:
+        text:
+
+cancelar_cita:
+  name: Cancelar cita
+  description: >-
+    Cancela una cita. Sin "cita_id" cancela la próxima cita. IMPORTANTE:
+    cambia tu cuenta real de DietoPro y no se puede deshacer desde Home
+    Assistant.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    cita_id:
+      name: ID de la cita
+      description: Opcional; por defecto, el "cita_id" del sensor Próxima cita.
+      required: false
+      selector:
+        text:
