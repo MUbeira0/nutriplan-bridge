@@ -51,6 +51,25 @@ def _as_date(value: object) -> date | None:
     return dt_util.parse_date(str(value))
 
 
+def dieta_index_for(day: date, count: int, start: date | None) -> int | None:
+    """Which entry of plan.dietas applies on a given date.
+
+    The "dieta" index is a weekday index (Monday=0) for the usual 7-dieta
+    weekly plan. A plan with 14/21/... dietas spans several weeks, so there
+    the index must advance week by week from the plan's start (counting from
+    the Monday of that start week) - using only the weekday meant the second
+    week of such a plan could never be shown.
+    """
+    if count <= 0:
+        return None
+    if count == 1:
+        return 0
+    if count > 7 and count % 7 == 0 and start is not None:
+        monday = start - timedelta(days=start.weekday())
+        return (day - monday).days % count
+    return day.weekday() % count
+
+
 def _pick_current_plan_id(plans: list) -> object | None:
     """The plan that applies TODAY: among the plans already sent to the
     patient, the one with the latest start date that is not in the future.
@@ -63,10 +82,12 @@ def _pick_current_plan_id(plans: list) -> object | None:
     plans = [p for p in plans if isinstance(p, dict) and p.get("id") is not None]
     if not plans:
         return None
-    sent = [p for p in plans if p.get("sentByEmailAt")] or plans
 
+    # No longer restricted to plans "sent by email": a plan published
+    # in-app without an email has no sentByEmailAt, and filtering on it kept
+    # the previous week's plan on screen after the new one took effect.
     today = dt_util.now().date()
-    dated = [(plan_start_date(p), p) for p in sent]
+    dated = [(plan_start_date(p), p) for p in plans]
     dated = [(d, p) for d, p in dated if d is not None]
     if dated:
         started = [(d, p) for d, p in dated if d <= today]

@@ -15,11 +15,12 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_track_time_change
 
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
-from .coordinator import DietoProDataUpdateCoordinator
-from .sensor import _plato_detail, shape_day
+from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
+from .sensor import _plato_detail, shape_day, shopping_list
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ SERVICE_RATE_DISH = "valorar_plato"
 SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
 SERVICE_GET_MEALS = "obtener_comidas"
+SERVICE_SHOPPING = "lista_compra"
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -57,6 +59,15 @@ GET_MEALS_SCHEMA = vol.Schema(
     {
         **_ENTRY_SCHEMA,
         vol.Optional("plan_id"): vol.Any(cv.positive_int, cv.string),
+    }
+)
+
+SHOPPING_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Optional("plan_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Optional("dias"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
+        vol.Optional("todo_entity"): cv.entity_id,
     }
 )
 
@@ -243,37 +254,76 @@ async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) ->
     return {"opciones": options}
 
 
-async def _async_handle_get_meals(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
-    """Every day (dieta) of a plan, current or a previous one, fully shaped.
+async def _load_plan(coordinator: DietoProDataUpdateCoordinator, plan_id: object) -> tuple[dict, bool]:
+    """(plan detail, is_current) for plan_id - the cached current plan, or
+    fetched from DietoPro for any other (previous/upcoming) one."""
+    data = coordinator.data or {}
+    current = data.get("plan_detail") if isinstance(data.get("plan_detail"), dict) else None
 
-    Lets the card browse other days of the week and older plans without the
+    if current is not None and (plan_id is None or str(plan_id) == str(current.get("id"))):
+        return current, True
+    if plan_id is None:
+        raise HomeAssistantError("No hay ningún plan activo")
+    try:
+        detail = await coordinator.client.async_get_plan_detail(plan_id)
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("cargar el plan", err) from err
+    if not isinstance(detail, dict):
+        raise HomeAssistantError("DietoPro no ha devuelto ese plan")
+    return detail, False
+
+
+async def _async_handle_get_meals(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Every day (dieta) of a plan, current or another one, fully shaped.
+
+    Lets the card browse other days of the week and other plans without the
     sensor having to carry all of that in its (size-limited) attributes.
     """
     coordinator = _resolve_coordinator(hass, call)
-    data = coordinator.data or {}
-    current = data.get("plan_detail") if isinstance(data.get("plan_detail"), dict) else None
-    plan_id = call.data.get("plan_id")
-
-    if current is not None and (plan_id is None or str(plan_id) == str(current.get("id"))):
-        detail = current
-    elif plan_id is None:
-        raise HomeAssistantError("No hay ningún plan activo")
-    else:
-        try:
-            detail = await coordinator.client.async_get_plan_detail(plan_id)
-        except (DietoProApiError, DietoProAuthError) as err:
-            raise _friendly_error("cargar el plan", err) from err
-        if not isinstance(detail, dict):
-            raise HomeAssistantError("DietoPro no ha devuelto ese plan")
+    detail, is_current = await _load_plan(coordinator, call.data.get("plan_id"))
 
     dietas = detail.get("dietas") if isinstance(detail.get("dietas"), list) else []
+    dias = [shape_day(i, d) for i, d in enumerate(dietas)]
+    kcal_days = [d["resumen_nutricional"]["energia_kcal"] for d in dias if d["resumen_nutricional"].get("energia_kcal")]
     return {
         "plan_id": detail.get("id"),
         "titulo": detail.get("title"),
         "creado": detail.get("created"),
-        "es_actual": current is not None and detail.get("id") == current.get("id"),
+        "inicio": plan_start_date(detail).isoformat() if plan_start_date(detail) else None,
+        "es_actual": is_current,
         "num_dietas": len(dietas),
-        "dias": [shape_day(i, d) for i, d in enumerate(dietas)],
+        "promedio_kcal": round(sum(kcal_days) / len(kcal_days)) if kcal_days else None,
+        "dias": dias,
+    }
+
+
+async def _async_handle_shopping(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Shopping list for a plan (all its days, or just the chosen ones),
+    optionally pushed straight into a Home Assistant to-do/shopping list."""
+    coordinator = _resolve_coordinator(hass, call)
+    detail, _ = await _load_plan(coordinator, call.data.get("plan_id"))
+    dietas = detail.get("dietas") if isinstance(detail.get("dietas"), list) else []
+    wanted = call.data.get("dias")
+    indexes = range(len(dietas)) if not wanted else [i for i in wanted if 0 <= i < len(dietas)]
+    items = shopping_list([shape_day(i, dietas[i]) for i in indexes])
+
+    todo_entity = call.data.get("todo_entity")
+    if todo_entity:
+        for item in items:
+            text = f"{item['nombre']} ({item['cantidad_g']} g)" if item["cantidad_g"] else item["nombre"]
+            try:
+                await hass.services.async_call(
+                    "todo", "add_item", {"entity_id": todo_entity, "item": text}, blocking=True
+                )
+            except HomeAssistantError as err:
+                raise HomeAssistantError(f"No se pudo añadir a {todo_entity}: {err}") from err
+
+    return {
+        "plan_id": detail.get("id"),
+        "dias": list(indexes),
+        "total": len(items),
+        "enviados_a_lista": todo_entity if todo_entity else None,
+        "items": items,
     }
 
 
@@ -331,6 +381,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _get_meals(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_get_meals(hass, call)
 
+        async def _shopping(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_shopping(hass, call)
+
         async def _change_plato(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_change_plato(hass, call)
 
@@ -348,6 +401,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             SERVICE_GET_MEALS,
             _get_meals,
             schema=GET_MEALS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SHOPPING,
+            _shopping,
+            schema=SHOPPING_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
         hass.services.async_register(
@@ -382,6 +442,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    async def _refresh_at_midnight(_now) -> None:
+        # Today's meals and the "current plan" depend on the date, but data
+        # was only recomputed on the (default 15 min) poll - after midnight
+        # the card kept showing yesterday's meals / last week's plan.
+        await coordinator.async_request_refresh()
+
+    entry.async_on_unload(async_track_time_change(hass, _refresh_at_midnight, hour=0, minute=0, second=15))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

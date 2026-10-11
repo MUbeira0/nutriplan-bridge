@@ -93,10 +93,13 @@ Esto crea 10 entidades bajo un dispositivo "Nutriplan Bridge":
 `sensor.nutriplan_bridge_mi_perfil`, `sensor.nutriplan_bridge_estado_eni`,
 `sensor.nutriplan_bridge_valoraciones`, `sensor.nutriplan_bridge_charlas`.
 
-Y cinco acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+Y seis acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
 - `nutriplan_bridge.obtener_comidas` (solo lectura: todos los días de un plan,
   el actual o uno anterior pasando `plan_id`, con comidas y resumen
   nutricional de cada día; es lo que usa la tarjeta para navegar)
+- `nutriplan_bridge.lista_compra` (suma los ingredientes de un plan, o de los
+  días que indiques, agrupados por categoría; con `todo_entity` los añade a
+  una lista de Home Assistant, p. ej. `todo.shopping_list`)
 - `nutriplan_bridge.marcar_chat_leido`
 - `nutriplan_bridge.valorar_plato` (necesita el `super_plato_id` que trae
   cada plato en el atributo `comidas` del sensor `comidas_hoy`, y una
@@ -140,7 +143,50 @@ Y cinco acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.23
+
+- **Sensores numéricos con histórico:** `peso`, `imc`, `grasa_corporal`,
+  `masa_magra`, `perimetro_de_cintura` (con clase/unidad, aptos para gráficas
+  y estadísticas a largo plazo), `calorias_de_hoy` (con macros en atributos)
+  y `proxima_comida` (comida que toca, hora y minutos restantes; se
+  reevalúa cada minuto).
+- **Calendarios:** `calendar.…_comidas` (cada comida del plan a su hora) y
+  `calendar.…_citas`, para el panel de calendario y para automatizaciones
+  ("30 minutos antes de la cita").
+- **Cambio de día/plan a medianoche:** antes solo se recalculaba en el
+  sondeo (cada 15 min por defecto), así que tras las 00:00 se seguía viendo
+  el día o el plan anterior. Ahora se refresca a las 00:00:15, el plan
+  vigente ya no exige "enviado por email" y los planes de 14/21... dietas
+  avanzan semana a semana.
+- **Descargar diagnóstico:** Ajustes → Dispositivos y servicios → Nutriplan
+  Bridge → Descargar diagnóstico (datos personales ocultos). Pégalo al
+  reportar un fallo.
+
+Ejemplo de aviso antes de cada comida:
+
+```yaml
+alias: Aviso de comida
+trigger:
+  - platform: calendar
+    event: start
+    offset: "-0:10:0"
+    entity_id: calendar.nutriplan_bridge_TUEMAIL_comidas
+action:
+  - service: notify.notify
+    data:
+      title: "Toca comer en 10 min"
+      message: "{{ trigger.calendar_event.summary }}"
+```
+
 ## Tarjeta
+
+Más novedades (0.23): la siguiente comida queda resaltada y las ya pasadas
+atenuadas; cada comida de hoy se puede marcar como tomada (se guarda en este
+navegador) con barra de calorías consumidas; reparto de macros; cuenta atrás
+de la cita; más métricas de seguimiento con su variación; panel de **lista de
+la compra** (todo el plan o un día, con casillas, y botón para volcarla a una
+lista de Home Assistant si indicas `todo_entity`); y editor visual con
+opciones para ocultar secciones y poner título.
 
 Novedades (0.22): selector de día (L-D, con el de hoy marcado) para ver
 cualquier día del plan, flechas para ir a **planes anteriores** (solo

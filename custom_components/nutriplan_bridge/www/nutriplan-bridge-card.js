@@ -85,6 +85,77 @@ function planLabel(plan) {
   return plan.titulo || formatShortDate(plan.inicio || plan.enviado || plan.creado) || `Plan ${plan.id}`;
 }
 
+// "Meals already eaten today" lives in this browser only (localStorage), keyed
+// by date so it resets itself every day; older days are cleaned up on read.
+const EATEN_PREFIX = "nutriplan_bridge_eaten_";
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+function loadEaten() {
+  try {
+    const key = EATEN_PREFIX + todayKey();
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(EATEN_PREFIX) && k !== key) localStorage.removeItem(k);
+    }
+    return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveEaten(set) {
+  try {
+    localStorage.setItem(EATEN_PREFIX + todayKey(), JSON.stringify([...set]));
+  } catch (e) {
+    /* storage unavailable: the tick just won't persist */
+  }
+}
+function loadChecked(key) {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) || "[]"));
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveChecked(key, set) {
+  try {
+    localStorage.setItem(key, JSON.stringify([...set]));
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function minutesOf(hora) {
+  const m = /(\d{1,2}):(\d{2})/.exec(String(hora || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+function mealKcal(meal) {
+  return (meal.platos || []).reduce((sum, p) => sum + (Number(p.calorias) || 0), 0);
+}
+
+function relativeDay(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(d) - startOf(new Date())) / 86400000);
+  if (days === 0) return "hoy";
+  if (days === 1) return "mañana";
+  if (days === -1) return "ayer";
+  return days > 0 ? `en ${days} días` : `hace ${-days} días`;
+}
+
+function macroBar(resumen) {
+  const p = (Number(resumen.proteinas_g) || 0) * 4;
+  const c = (Number(resumen.carbohidratos_g) || 0) * 4;
+  const g = (Number(resumen.grasas_g) || 0) * 9;
+  const total = p + c + g;
+  if (!total) return "";
+  const pct = (v) => ((v / total) * 100).toFixed(1);
+  return `<div class="macro-bar" title="Reparto de calorías: proteínas ${Math.round((p / total) * 100)}% · hidratos ${Math.round((c / total) * 100)}% · grasas ${Math.round((g / total) * 100)}%"><span style="width:${pct(p)}%;background:#43a047"></span><span style="width:${pct(c)}%;background:#fb8c00"></span><span style="width:${pct(g)}%;background:#8e24aa"></span></div><div class="macro-legend"><span><i style="background:#43a047"></i>Proteínas ${Math.round((p / total) * 100)}%</span><span><i style="background:#fb8c00"></i>Hidratos ${Math.round((c / total) * 100)}%</span><span><i style="background:#8e24aa"></i>Grasas ${Math.round((g / total) * 100)}%</span></div>`;
+}
+
 function sparkline(values) {
   if (values.length < 2) return "";
   const w = 120;
@@ -150,6 +221,9 @@ class NutriplanBridgeCard extends HTMLElement {
     this._weekCache = new Map();
     this._weekLoading = new Set();
     this._weekError = new Map();
+    this._eaten = loadEaten();
+    // Shopping list panel: { scope: "week"|"day", status, items, error, todoMsg }
+    this._shop = { scope: null, status: "idle" };
     // Attach the shadow root immediately: Lovelace can call setConfig()
     // (e.g. for the "add card" preview) before this element is connected
     // to the document, so connectedCallback is too late and leaves
@@ -388,6 +462,29 @@ class NutriplanBridgeCard extends HTMLElement {
         .trend { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
         .trend .spark { width: 120px; height: 28px; flex-shrink: 0; }
         .trend .delta { font-size: 0.82em; color: var(--secondary-text-color); }
+        .meal-card.next { box-shadow: inset 3px 0 0 var(--primary-color); }
+        .meal-card.past { opacity: .55; }
+        .next-tag {
+          font-size: 0.65em; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0;
+          color: var(--text-primary-color, #fff); background: var(--primary-color);
+          border-radius: 8px; padding: 1px 6px;
+        }
+        ha-icon.eaten-toggle { --mdc-icon-size: 22px; color: var(--secondary-text-color); cursor: pointer; flex-shrink: 0; }
+        ha-icon.eaten-toggle.done { color: var(--primary-color); }
+        .progress { height: 6px; border-radius: 3px; background: var(--divider-color, rgba(127,127,127,.25)); overflow: hidden; margin: 2px 0 4px 0; }
+        .progress > div { height: 100%; background: var(--primary-color); transition: width .2s ease; }
+        .progress-label { font-size: 0.75em; color: var(--secondary-text-color); margin-bottom: 8px; }
+        .macro-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 4px 0 4px 0; }
+        .macro-bar span { display: block; height: 100%; }
+        .macro-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 0.72em; color: var(--secondary-text-color); margin-bottom: 8px; }
+        .macro-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+        .section-head { display: flex; align-items: center; justify-content: space-between; }
+        .appointment small { color: var(--secondary-text-color); }
+        .shop-scope { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+        .shop-group { font-size: 0.75em; text-transform: uppercase; letter-spacing: .03em; color: var(--secondary-text-color); margin: 8px 0 2px 0; }
+        .shop-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.88em; color: var(--primary-text-color); cursor: pointer; }
+        .shop-item.checked span.shop-name { text-decoration: line-through; opacity: .5; }
+        .shop-item .shop-qty { margin-left: auto; color: var(--secondary-text-color); font-size: 0.9em; white-space: nowrap; }
         .opciones-plato .plato-row:not(:first-child) { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
       </style>
       <ha-card>
@@ -397,6 +494,7 @@ class NutriplanBridgeCard extends HTMLElement {
     // Delegated once on the shadow root (survives ha-card's innerHTML being
     // replaced on every render) instead of re-attaching listeners each time.
     this.shadowRoot.addEventListener("click", (ev) => this._handleClick(ev));
+    this.shadowRoot.addEventListener("change", (ev) => this._handleChange(ev));
     // "error" on <img> doesn't bubble, so this only works with capture:true.
     this.shadowRoot.addEventListener("error", (ev) => this._handleImageError(ev), true);
   }
@@ -452,6 +550,49 @@ class NutriplanBridgeCard extends HTMLElement {
       this._weekError.set(key, err.message || String(err));
     }
     this._weekLoading.delete(key);
+    this._safeRender();
+  }
+
+  _handleChange(ev) {
+    const box = ev.target.closest && ev.target.closest(".shop-check");
+    if (!box) return;
+    const key = this._shopStorageKey();
+    const checked = loadChecked(key);
+    if (box.checked) checked.add(box.dataset.name);
+    else checked.delete(box.dataset.name);
+    saveChecked(key, checked);
+    this._safeRender();
+  }
+
+  _shopStorageKey() {
+    return `nutriplan_bridge_shop_${this._planId}_${this._shop.scope}_${this._shop.scope === "day" ? this._dietaIndex : "all"}`;
+  }
+
+  async _loadShopping(scope, todoEntity) {
+    this._shop = { scope, status: "loading" };
+    this._safeRender();
+    const data = {};
+    if (this._view.planId !== null) data.plan_id = this._view.planId;
+    if (scope === "day") data.dias = [this._dietaIndex];
+    if (todoEntity) data.todo_entity = todoEntity;
+    try {
+      const res = await this._callService("lista_compra", this._withAccount(data), true);
+      this._shop = {
+        scope,
+        status: "ready",
+        items: res.items || [],
+        todoMsg: todoEntity ? `Añadidos ${res.total} ingredientes a la lista.` : "",
+      };
+    } catch (err) {
+      this._shop = { scope, status: "error", error: err.message || String(err) };
+    }
+    this._safeRender();
+  }
+
+  _toggleEaten(franja) {
+    if (this._eaten.has(franja)) this._eaten.delete(franja);
+    else this._eaten.add(franja);
+    saveEaten(this._eaten);
     this._safeRender();
   }
 
@@ -539,6 +680,26 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleClick(ev) {
+    const eatenBtn = ev.target.closest(".eaten-toggle");
+    if (eatenBtn) {
+      this._toggleEaten(eatenBtn.dataset.franja);
+      return;
+    }
+    const shopScope = ev.target.closest(".shop-load");
+    if (shopScope) {
+      this._loadShopping(shopScope.dataset.scope);
+      return;
+    }
+    if (ev.target.closest(".shop-close")) {
+      this._shop = { scope: null, status: "idle" };
+      this._safeRender();
+      return;
+    }
+    const shopTodo = ev.target.closest(".shop-todo");
+    if (shopTodo) {
+      this._loadShopping(this._shop.scope || "week", (this._config || {}).todo_entity);
+      return;
+    }
     const dayChip = ev.target.closest(".day-chip");
     if (dayChip) {
       this._selectDay(Number(dayChip.dataset.day));
@@ -793,7 +954,7 @@ class NutriplanBridgeCard extends HTMLElement {
     `;
   }
 
-  _renderMeal(meal, labelsOverride) {
+  _renderMeal(meal, labelsOverride, ctx = {}) {
     const franja = meal.franja;
     const isOpen = this._expanded.has(franja);
     const icon = MEAL_ICONS[franja] || "mdi:food";
@@ -813,12 +974,23 @@ class NutriplanBridgeCard extends HTMLElement {
       bodyHtml = `<div class="meal-body">${platos.map((p) => this._renderPlatoRow(p, franja)).join("")}</div>`;
     }
 
+    const isNext = ctx.nextFranja === franja;
+    const isEaten = ctx.eatenEnabled && this._eaten.has(franja);
+    const isPast = ctx.pastFranjas && ctx.pastFranjas.has(franja) && !isNext;
+    const eatenHtml = ctx.eatenEnabled
+      ? `<ha-icon class="eaten-toggle${isEaten ? " done" : ""}" data-franja="${escapeHtml(franja)}" icon="${
+          isEaten ? "mdi:check-circle" : "mdi:circle-outline"
+        }" title="Marcar como tomada"></ha-icon>`
+      : "";
+
     return `
-      <div class="meal-card">
+      <div class="meal-card${isNext ? " next" : ""}${isPast || isEaten ? " past" : ""}">
         <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}">
           ${thumbHtml}
           <span class="franja">${label}${meal.hora ? ` · ${escapeHtml(meal.hora)}` : ""}</span>
+          ${isNext ? '<span class="next-tag">Siguiente</span>' : ""}
           <span class="plato">${escapeHtml(summary)}</span>
+          ${eatenHtml}
           <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
         </div>
         ${bodyHtml}
@@ -912,7 +1084,26 @@ class NutriplanBridgeCard extends HTMLElement {
     if (mealsMessage) {
       mealsHtml = `<div class="empty">${escapeHtml(mealsMessage)}</div>`;
     } else if (meals.length) {
-      mealsHtml = `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels)).join("")}</div>`;
+      const ctx = { eatenEnabled: isToday && cfg.hide_eaten !== true };
+      if (isToday) {
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const timed = meals.map((m) => [m, minutesOf(m.hora)]).filter(([, t]) => t !== null);
+        const upcoming = timed.filter(([, t]) => t + 30 >= nowMin).sort((a, b) => a[1] - b[1])[0];
+        ctx.nextFranja = upcoming ? upcoming[0].franja : null;
+        ctx.pastFranjas = new Set(timed.filter(([, t]) => t + 30 < nowMin).map(([m]) => m.franja));
+      }
+      mealsHtml = `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels, ctx)).join("")}</div>`;
+      if (ctx.eatenEnabled) {
+        const total = Math.round((resumen && resumen.energia_kcal) || meals.reduce((a, m) => a + mealKcal(m), 0));
+        const eatenKcal = Math.round(meals.filter((m) => this._eaten.has(m.franja)).reduce((a, m) => a + mealKcal(m), 0));
+        if (total) {
+          mealsHtml =
+            `<div class="progress"><div style="width:${Math.min(100, (eatenKcal / total) * 100).toFixed(1)}%"></div></div>` +
+            `<div class="progress-label">${eatenKcal} / ${total} kcal tomadas hoy</div>` +
+            mealsHtml;
+        }
+      }
     } else {
       mealsHtml = `<div class="empty">Sin comidas programadas ${isToday ? "para hoy" : "este día"}</div>`;
     }
@@ -925,7 +1116,12 @@ class NutriplanBridgeCard extends HTMLElement {
           parts.push(`<span>${l} <b>${escapeHtml(Math.round(resumen[k]))}</b> g</span>`);
         }
       });
+      const week = this._weekCache.get(this._viewKey());
+      if (week && week.promedio_kcal && !isToday) {
+        parts.push(`<span>Media semana <b>${escapeHtml(week.promedio_kcal)}</b> kcal</span>`);
+      }
       summaryHtml = `<div class="day-summary">${parts.join("")}</div>`;
+      if (cfg.hide_macros !== true) summaryHtml += macroBar(resumen);
     }
 
     let daysHtml = "";
@@ -960,25 +1156,32 @@ class NutriplanBridgeCard extends HTMLElement {
     if (apptEntity && apptEntity.state && !["unknown", "unavailable"].includes(apptEntity.state)) {
       const label =
         apptEntity.state === "programada" ? "Cita programada" : formatDate(apptEntity.state);
+      const rel = apptEntity.state === "programada" ? "" : relativeDay(apptEntity.state);
       apptHtml = `<div class="appointment"><ha-icon icon="mdi:calendar-clock"></ha-icon><span>${escapeHtml(
         label
-      )}</span></div>`;
+      )}${rel ? ` <small>(${escapeHtml(rel)})</small>` : ""}</span></div>`;
     }
 
     let metricsHtml = "";
     if (trackingEntity) {
       const a = trackingEntity.attributes || {};
       const metrics = [
-        ["ultimo_peso", "Peso (kg)"],
-        ["ultimo_imc", "IMC"],
-        ["ultimo_peso_grasa", "Grasa (kg)"],
+        ["ultimo_peso", "Peso (kg)", "delta_peso"],
+        ["ultimo_imc", "IMC", "delta_imc"],
+        ["ultimo_peso_grasa", "Grasa (kg)", "delta_peso_grasa"],
+        ["ultimo_porcentaje_grasa", "Grasa (%)", "delta_porcentaje_grasa"],
+        ["ultimo_perimetro_cintura", "Cintura (cm)", null],
       ].filter(([key]) => a[key] !== undefined && a[key] !== null);
       if (metrics.length) {
         metricsHtml = `<div class="metrics">${metrics
-          .map(
-            ([key, label]) =>
-              `<div class="metric"><span class="value">${escapeHtml(a[key])}</span><span class="label">${label}</span></div>`
-          )
+          .map(([key, label, deltaKey]) => {
+            const d = deltaKey ? a[deltaKey] : null;
+            const arrow =
+              typeof d === "number" && d !== 0
+                ? ` <small title="Variación respecto a la medición anterior" style="color:${d < 0 ? "#43a047" : "#fb8c00"}">${d < 0 ? "▼" : "▲"}${Math.abs(d)}</small>`
+                : "";
+            return `<div class="metric"><span class="value">${escapeHtml(a[key])}${arrow}</span><span class="label">${label}</span></div>`;
+          })
           .join("")}</div>`;
         const pesos = (Array.isArray(a.historial) ? a.historial : [])
           .map((h) => Number(h.peso))
@@ -1001,6 +1204,47 @@ class NutriplanBridgeCard extends HTMLElement {
 
     const unread = chatEntity ? Number(chatEntity.state) || 0 : 0;
 
+    let shopHtml = "";
+    if (cfg.hide_shopping !== true) {
+      const sh = this._shop;
+      const scopeBtns = `<div class="shop-scope"><button class="action-btn shop-load" data-scope="week">Todo el plan</button>${
+        numDietas > 1 ? `<button class="action-btn shop-load" data-scope="day">Solo ${escapeHtml(dayName(day))}</button>` : ""
+      }</div>`;
+      let body;
+      if (sh.status === "loading") {
+        body = '<div class="action-status">Calculando la lista…</div>';
+      } else if (sh.status === "error") {
+        body = `${scopeBtns}<div class="action-status error">${escapeHtml(sh.error)}</div>`;
+      } else if (sh.status === "ready") {
+        const checked = loadChecked(this._shopStorageKey());
+        const groups = new Map();
+        (sh.items || []).forEach((it) => {
+          const g = it.categoria || it.grupo || "Otros";
+          if (!groups.has(g)) groups.set(g, []);
+          groups.get(g).push(it);
+        });
+        const list = [...groups.entries()]
+          .map(
+            ([g, items]) =>
+              `<div class="shop-group">${escapeHtml(g)}</div>` +
+              items
+                .map(
+                  (it) =>
+                    `<label class="shop-item${checked.has(it.nombre) ? " checked" : ""}"><input type="checkbox" class="shop-check" data-name="${escapeHtml(it.nombre)}" ${checked.has(it.nombre) ? "checked" : ""}><span class="shop-name">${escapeHtml(it.nombre)}</span><span class="shop-qty">${it.cantidad_g ? escapeHtml(it.cantidad_g) + " g" : ""}</span></label>`
+                )
+                .join("")
+          )
+          .join("");
+        body = `${scopeBtns}${list || '<div class="empty">Este plan no tiene ingredientes.</div>'}
+          ${cfg.todo_entity ? '<button class="action-btn shop-todo">Añadir a la lista de Home Assistant</button>' : ""}
+          <button class="action-btn shop-close">Cerrar</button>
+          ${sh.todoMsg ? `<div class="action-status">${escapeHtml(sh.todoMsg)}</div>` : ""}`;
+      } else {
+        body = scopeBtns;
+      }
+      shopHtml = `<div class="section"><div class="section-title">Lista de la compra</div>${body}</div>`;
+    }
+
     const avatarHtml =
       dietistaAvatar && !this._brokenImages.has(dietistaAvatar)
         ? `<img class="avatar" src="${escapeHtml(dietistaAvatar)}" alt="${escapeHtml(dietistaName)}" />`
@@ -1010,7 +1254,7 @@ class NutriplanBridgeCard extends HTMLElement {
       <div class="header">
         ${avatarHtml}
         <div class="header-text">
-          <div class="title">${escapeHtml(planName)}</div>
+          <div class="title">${escapeHtml(cfg.title || planName)}</div>
           <div class="subtitle">${escapeHtml(dietistaName)}</div>
         </div>
         ${unread > 0 ? `<span class="badge" title="Mensajes sin leer del dietista"><ha-icon icon="mdi:chat-processing"></ha-icon>${unread}</span>` : ""}
@@ -1018,19 +1262,28 @@ class NutriplanBridgeCard extends HTMLElement {
 
       <div class="section">
         ${planNavHtml}
-        <div class="section-title">${escapeHtml(sectionTitle)}</div>
+        <div class="section-head">
+          <div class="section-title">${escapeHtml(sectionTitle)}</div>
+          ${viewingCurrent && !isToday && todayIndex !== undefined ? '<button class="link-btn">Volver a hoy</button>' : ""}
+        </div>
         ${daysHtml}
         ${summaryHtml}
         ${mealsHtml}
       </div>
 
-      <div class="section">
+      ${
+        cfg.hide_appointment === true
+          ? ""
+          : `<div class="section">
         <div class="section-title">Próxima cita</div>
         ${apptHtml}
-      </div>
+      </div>`
+      }
+
+      ${shopHtml}
 
       ${
-        trackingEntity
+        trackingEntity && cfg.hide_tracking !== true
           ? `<div class="section">
               <div class="section-title">Último seguimiento</div>
               ${metricsHtml}
@@ -1054,8 +1307,27 @@ if (!customElements.get("nutriplan-bridge-card")) {
 }
 
 /* Visual (GUI) editor: shown when the user clicks "Edit" on the card in the
- * dashboard. All fields are optional - entities are auto-detected - this is
- * only useful if you run more than one Nutriplan Bridge account. */
+ * dashboard. Everything is optional - entities are auto-detected; the entity
+ * pickers are only useful with more than one Nutriplan Bridge account. */
+const EDITOR_SCHEMA = [
+  { name: "title", label: "Título (opcional)", selector: { text: {} } },
+  { name: "hide_appointment", label: "Ocultar próxima cita", selector: { boolean: {} } },
+  { name: "hide_tracking", label: "Ocultar último seguimiento", selector: { boolean: {} } },
+  { name: "hide_shopping", label: "Ocultar lista de la compra", selector: { boolean: {} } },
+  { name: "hide_macros", label: "Ocultar reparto de macros", selector: { boolean: {} } },
+  { name: "hide_eaten", label: "Ocultar marcar comidas como tomadas", selector: { boolean: {} } },
+  {
+    name: "todo_entity",
+    label: "Lista de Home Assistant para la compra (opcional)",
+    selector: { entity: { domain: "todo" } },
+  },
+  ...ENTITY_FIELDS.map(({ key, label }) => ({
+    name: key,
+    label: `Entidad: ${label} (solo con varias cuentas)`,
+    selector: { entity: { domain: "sensor" } },
+  })),
+];
+
 class NutriplanBridgeCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
@@ -1064,62 +1336,34 @@ class NutriplanBridgeCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._forms) {
-      this._forms.forEach((form) => (form.hass = hass));
-    }
+    if (this._form) this._form.hass = hass;
   }
 
   connectedCallback() {
     this._render();
   }
 
-  _valueChanged(key, value) {
-    const next = { ...this._config };
-    if (value) {
-      next[key] = value;
-    } else {
-      delete next[key];
-    }
+  _onChange(ev) {
+    ev.stopPropagation();
+    const next = {};
+    Object.entries(ev.detail.value || {}).forEach(([k, v]) => {
+      if (v !== "" && v !== undefined && v !== null && v !== false) next[k] = v;
+    });
     this._config = next;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: next }, bubbles: true, composed: true }));
   }
 
   _render() {
     if (!this.isConnected) return;
-    this.innerHTML = `
-      <style>
-        .info { padding: 8px 2px 14px 2px; color: var(--secondary-text-color); font-size: 0.9em; }
-        .field { margin-bottom: 8px; }
-        .field label { display: block; font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 2px; }
-      </style>
-      <div class="info">
-        Las entidades se detectan automáticamente (no hace falta rellenar nada).
-        Usa esto solo si tienes varias cuentas de Nutriplan Bridge y quieres
-        forzar qué sensores usa esta tarjeta en concreto.
-      </div>
-      <div class="fields"></div>
-    `;
-    const container = this.querySelector(".fields");
-    this._forms = [];
-    ENTITY_FIELDS.forEach(({ key, label }) => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "field";
-      const labelEl = document.createElement("label");
-      labelEl.textContent = label;
-      wrapper.appendChild(labelEl);
-
-      const picker = document.createElement("ha-entity-picker");
-      picker.hass = this._hass;
-      picker.value = this._config[key] || "";
-      picker.includeDomains = ["sensor"];
-      picker.addEventListener("value-changed", (ev) => {
-        ev.stopPropagation();
-        this._valueChanged(key, ev.detail.value);
-      });
-      wrapper.appendChild(picker);
-      container.appendChild(wrapper);
-      this._forms.push(picker);
-    });
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => schema.label || schema.name;
+      this._form.addEventListener("value-changed", (ev) => this._onChange(ev));
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = EDITOR_SCHEMA;
+    this._form.data = this._config || {};
   }
 }
 
@@ -1132,7 +1376,7 @@ if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
   window.customCards.push({
     type: "nutriplan-bridge-card",
     name: "Nutriplan Bridge",
-    description: "Plan actual, comidas de hoy (con receta, ingredientes y cambio/valoración de platos), próxima cita y seguimientos.",
+    description: "Plan actual y planes anteriores, comidas por día con siguiente comida, progreso de calorías, macros, lista de la compra, próxima cita y seguimiento del peso.",
   });
 }
 })();

@@ -15,20 +15,21 @@ attribute.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_EMAIL
+from homeassistant.const import CONF_EMAIL, UnitOfMass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import BASE_URL, DOMAIN
-from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
+from .coordinator import DietoProDataUpdateCoordinator, dieta_index_for, plan_start_date
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -287,6 +288,76 @@ def plan_summaries(plans: Any) -> list[dict]:
     return out
 
 
+DEFAULT_FRANJA_LABELS = {
+    "desayuno": "Desayuno",
+    "tentempie1": "Tentempié",
+    "tentempie2": "Tentempié",
+    "comida": "Comida",
+    "merienda1": "Merienda",
+    "merienda2": "Merienda",
+    "cena": "Cena",
+    "recena1": "Recena",
+    "recena2": "Recena",
+}
+
+
+def franja_labels(data: Any) -> dict[str, str]:
+    """Meal-slot labels: the dietitian's own names when sent, else defaults."""
+    labels = dict(DEFAULT_FRANJA_LABELS)
+    dietista = data.get("dietista") if isinstance(data, dict) else None
+    items = dietista.get("nombreIngestas") if isinstance(dietista, dict) else None
+    for item in items or []:
+        if isinstance(item, dict) and item.get("ingestaType") and item.get("ingestaName"):
+            labels[item["ingestaType"]] = item["ingestaName"]
+    return labels
+
+
+def parse_hora(value: Any) -> time | None:
+    """Meal "hora" -> time of day ("07:00", "07:00:00" or a full ISO datetime)."""
+    if not value:
+        return None
+    text = str(value)
+    parsed = dt_util.parse_time(text)
+    if parsed is not None:
+        return parsed
+    dt = dt_util.parse_datetime(text)
+    return dt.time() if dt is not None else None
+
+
+def shopping_list(days: list[dict]) -> list[dict]:
+    """Aggregate every ingredient of the given shaped days (see shape_day)
+    into one shopping list: summed grams per food, grouped by category."""
+    totals: dict[str, dict] = {}
+    for day in days:
+        for meal in day.get("comidas") or []:
+            for plato in meal.get("platos") or []:
+                for ing in plato.get("ingredientes") or []:
+                    nombre = (ing.get("nombre") or "").strip()
+                    if not nombre:
+                        continue
+                    try:
+                        cantidad = float(ing.get("cantidad") or 0)
+                    except (TypeError, ValueError):
+                        cantidad = 0.0
+                    item = totals.setdefault(
+                        nombre.lower(),
+                        {
+                            "nombre": nombre,
+                            "cantidad_g": 0.0,
+                            "veces": 0,
+                            "grupo": ing.get("grupo"),
+                            "categoria": ing.get("categoria"),
+                        },
+                    )
+                    item["cantidad_g"] += cantidad
+                    item["veces"] += 1
+    items = list(totals.values())
+    for item in items:
+        item["cantidad_g"] = round(item["cantidad_g"])
+    items.sort(key=lambda i: (i.get("categoria") or "~", i["nombre"].lower()))
+    return items
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DietoProDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
@@ -301,6 +372,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DietoProEniSensor(coordinator, entry),
             DietoProValoracionesSensor(coordinator, entry),
             DietoProCharlasSensor(coordinator, entry),
+            DietoProTodayEnergySensor(coordinator, entry),
+            DietoProNextMealSensor(coordinator, entry),
+            *(
+                DietoProMetricSensor(coordinator, entry, *spec)
+                for spec in METRIC_SENSORS
+            ),
         ]
     )
 
@@ -407,9 +484,9 @@ class DietoProTodayMealsSensor(DietoProEntity):
         dietas = self._dietas()
         if not dietas:
             return None, None
-        if len(dietas) == 1:
-            return 0, dietas[0]
-        index = dt_util.now().weekday() % len(dietas)
+        plan = (self.coordinator.data or {}).get("plan_detail")
+        start = plan_start_date(plan) if isinstance(plan, dict) else None
+        index = dieta_index_for(dt_util.now().date(), len(dietas), start)
         return index, dietas[index]
 
     def _todays_dieta(self) -> dict | None:
@@ -889,3 +966,144 @@ class DietoProCharlasSensor(DietoProEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return {"charlas": self._cleaned(), "raw": self._charlas()}
+
+
+class DietoProTodayEnergySensor(DietoProTodayMealsSensor):
+    """Total calories (and macros) planned for today - a real number, so it
+    can be graphed, used in automations and kept in long-term statistics."""
+
+    _attr_icon = "mdi:fire"
+    _attr_native_unit_of_measurement = "kcal"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset()
+
+    def __init__(self, coordinator, entry) -> None:
+        DietoProEntity.__init__(self, coordinator, entry, "calorias_hoy", "Calorías de hoy")
+
+    @property
+    def entity_picture(self) -> None:
+        return None
+
+    def _totals(self) -> dict:
+        platos = [p for m in self._meals() for p in (m.get("platos") or [])]
+        return _sum_nutrients([p.get("nutrientes") or {} for p in platos])
+
+    @property
+    def native_value(self) -> int | None:
+        kcal = self._totals().get("energia_kcal")
+        return round(kcal) if kcal else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        totals = self._totals()
+        prot, gras, carb = (totals.get(k) or 0 for k in ("proteinas_g", "grasas_g", "carbohidratos_g"))
+        kcal_macros = prot * 4 + carb * 4 + gras * 9
+        pct = (lambda g, f: round(g * f * 100 / kcal_macros)) if kcal_macros else (lambda g, f: None)
+        return {
+            "proteinas_g": totals.get("proteinas_g"),
+            "grasas_g": totals.get("grasas_g"),
+            "carbohidratos_g": totals.get("carbohidratos_g"),
+            "fibra_g": totals.get("fibra_g"),
+            "proteinas_pct": pct(prot, 4),
+            "grasas_pct": pct(gras, 9),
+            "carbohidratos_pct": pct(carb, 4),
+            "dieta_index": self._todays_dieta_indexed()[0],
+        }
+
+
+class DietoProNextMealSensor(DietoProTodayMealsSensor):
+    """The next meal still to come today (by its scheduled "hora")."""
+
+    _attr_icon = "mdi:clock-outline"
+    _unrecorded_attributes = frozenset({"platos"})
+
+    def __init__(self, coordinator, entry) -> None:
+        DietoProEntity.__init__(self, coordinator, entry, "proxima_comida", "Próxima comida")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # "Next" depends on the clock, not only on data: re-evaluate every
+        # minute instead of waiting for the next (15 min) poll.
+        self.async_on_remove(
+            async_track_time_interval(self.hass, lambda _now: self.async_write_ha_state(), timedelta(minutes=1))
+        )
+
+    @property
+    def entity_picture(self) -> None:
+        return None
+
+    def _next(self) -> tuple[dict, time] | tuple[None, None]:
+        now_t = dt_util.now().time()
+        best: tuple[dict, time] | None = None
+        for meal in self._meals():
+            hora = parse_hora(meal.get("hora"))
+            if hora is not None and hora >= now_t and (best is None or hora < best[1]):
+                best = (meal, hora)
+        return best if best else (None, None)
+
+    @property
+    def native_value(self) -> str:
+        meal, _ = self._next()
+        if meal is None:
+            return "Nada más hoy"
+        return franja_labels(self.coordinator.data).get(meal["franja"], meal["franja"])
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        meal, hora = self._next()
+        if meal is None:
+            return {}
+        platos = meal.get("platos") or []
+        now = dt_util.now()
+        start = datetime.combine(now.date(), hora, tzinfo=now.tzinfo)
+        return {
+            "franja": meal["franja"],
+            "hora": hora.strftime("%H:%M"),
+            "en_minutos": max(0, int((start - now).total_seconds() // 60)),
+            "platos": [p.get("nombre") for p in platos],
+            "calorias": sum(p.get("calorias") or 0 for p in platos),
+        }
+
+
+# (key, name, field in _clean_seguimiento, unit, icon, device_class)
+METRIC_SENSORS = (
+    ("peso", "Peso", "peso", UnitOfMass.KILOGRAMS, "mdi:scale-bathroom", SensorDeviceClass.WEIGHT),
+    ("imc", "IMC", "imc", None, "mdi:human", None),
+    ("porcentaje_grasa", "Grasa corporal", "porcentaje_grasa", "%", "mdi:water-percent", None),
+    ("masa_magra", "Masa magra", "peso_masa_magra", UnitOfMass.KILOGRAMS, "mdi:arm-flex", SensorDeviceClass.WEIGHT),
+    ("perimetro_cintura", "Perímetro de cintura", "perimetro_cintura", "cm", "mdi:tape-measure", None),
+)
+
+
+class DietoProMetricSensor(DietoProEntity):
+    """Latest body measurement as its own numeric sensor (weight, BMI, body
+    fat %...), so Home Assistant keeps history/statistics for it."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry, key, name, field, unit, icon, device_class) -> None:
+        super().__init__(coordinator, entry, key, name)
+        self._field = field
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self._attr_device_class = device_class
+
+    def _latest(self) -> dict:
+        data = (self.coordinator.data or {}).get("seguimientos")
+        items = [s for s in data if isinstance(s, dict) and s.get("createdTimestamp")] if isinstance(data, list) else []
+        if not items:
+            return {}
+        try:
+            items.sort(key=lambda s: float(s["createdTimestamp"]))
+        except (TypeError, ValueError):
+            return {}
+        return _clean_seguimiento(items[-1])
+
+    @property
+    def native_value(self) -> float | None:
+        value = self._latest().get(self._field)
+        return value if isinstance(value, (int, float)) else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"fecha_medicion": self._latest().get("fecha")}

@@ -163,3 +163,41 @@ obtener_comidas:
       required: false
       selector:
         text:
+
+lista_compra:
+  name: Lista de la compra
+  description: >-
+    Suma los ingredientes de todos los días de un plan (o solo de los días
+    indicados) en una lista de la compra agrupada por categoría. Opcionalmente
+    la añade a una lista de tareas/compra de Home Assistant.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    plan_id:
+      name: ID del plan
+      description: Sin indicar, usa el plan actual.
+      required: false
+      selector:
+        text:
+    dias:
+      name: Días
+      description: >-
+        Índices de día a incluir (0 = lunes ... 6 = domingo). Sin indicar,
+        todos.
+      required: false
+      selector:
+        object:
+    todo_entity:
+      name: Lista de Home Assistant
+      description: Si se indica, cada ingrediente se añade a esa lista.
+      required: false
+      selector:
+        entity:
+          domain: todo
