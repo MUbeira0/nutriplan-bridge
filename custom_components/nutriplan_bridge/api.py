@@ -94,8 +94,13 @@ class DietoProApiClient:
         form.add_field("_password", self._password)
         try:
             async with self._session.post(f"{BASE_URL}/api/login_check", data=form) as resp:
-                if resp.status != 200:
+                if resp.status in (400, 401, 403):
                     raise DietoProAuthError(f"Login failed with status {resp.status}")
+                if resp.status != 200:
+                    # A 5xx/429 is DietoPro being down, not bad credentials -
+                    # raising an auth error here would send the user into
+                    # the reauth flow for what is just a temporary outage.
+                    raise DietoProApiError(f"Login failed with status {resp.status}")
                 data = await resp.json(content_type=None)
         except aiohttp.ClientError as err:
             raise DietoProApiError(f"Cannot reach {BASE_URL}: {err}") from err
@@ -142,13 +147,15 @@ class DietoProApiClient:
                         if not await self._async_refresh():
                             await self.async_login()
                         continue
-                    if resp.status == 404:
-                        # Route exists conceptually but there is nothing to return for this account
+                    if resp.status == 404 and method == "GET":
+                        # Route exists conceptually but there is nothing to return for this account.
+                        # Only for reads: a 404 on PUT/PATCH means the write did NOT happen, and
+                        # returning None here made cambiar_plato report success while changing nothing.
                         return None
                     if resp.status >= 400:
                         text = await resp.text()
                         raise DietoProApiError(f"{method} {path} -> {resp.status}: {text[:200]}")
-                    if resp.content_type == "application/json":
+                    if "json" in resp.content_type:
                         data = await resp.json(content_type=None)
                         return camelize(data)
                     return await resp.text()

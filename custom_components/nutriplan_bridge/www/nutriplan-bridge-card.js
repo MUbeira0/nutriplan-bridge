@@ -36,6 +36,7 @@
  * plan - see api.py's docstring for what is/isn't fully confirmed about it.
  */
 
+(() => {
 const MEAL_LABELS = {
   desayuno: "Desayuno",
   tentempie1: "Tentempié",
@@ -60,13 +61,43 @@ const MEAL_ICONS = {
   recena2: "mdi:moon-waning-crescent",
 };
 
+const WEEKDAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+const WEEKDAYS_SHORT = ["L", "M", "X", "J", "V", "S", "D"];
+
 const ENTITY_FIELDS = [
   { key: "plan_entity", suffix: "_plan_actual", label: "Plan actual" },
   { key: "meals_entity", suffix: "_comidas_hoy", label: "Comidas de hoy" },
   { key: "appointment_entity", suffix: "_proxima_cita", label: "Próxima cita" },
   { key: "tracking_entity", suffix: "_seguimientos", label: "Seguimientos" },
   { key: "dietista_entity", suffix: "_dietista", label: "Dietista" },
+  { key: "chat_entity", suffix: "_mensajes_sin_leer", label: "Mensajes sin leer" },
 ];
+
+function formatShortDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function planLabel(plan) {
+  if (!plan) return "Plan";
+  return plan.titulo || formatShortDate(plan.enviado || plan.creado) || `Plan ${plan.id}`;
+}
+
+function sparkline(values) {
+  if (values.length < 2) return "";
+  const w = 120;
+  const h = 28;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const pts = values
+    .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - 3 - ((v - min) / span) * (h - 6)).toFixed(1)}`)
+    .join(" ");
+  const last = pts.split(" ").pop().split(",");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${last[0]}" cy="${last[1]}" r="2.5" fill="var(--primary-color)"/></svg>`;
+}
 
 function findEntity(hass, explicitId, suffix) {
   if (explicitId && hass.states[explicitId]) return hass.states[explicitId];
@@ -112,6 +143,13 @@ class NutriplanBridgeCard extends HTMLElement {
     // re-triggering the same failed request (and its icon-swap flicker)
     // every time the card re-renders.
     this._brokenImages = new Set();
+    // Which plan/day is being viewed: planId null = the current plan, day
+    // null = today. Other days/plans come from nutriplan_bridge.obtener_comidas
+    // and are cached per plan ("current" or the plan id).
+    this._view = { planId: null, day: null };
+    this._weekCache = new Map();
+    this._weekLoading = new Set();
+    this._weekError = new Map();
     // Attach the shadow root immediately: Lovelace can call setConfig()
     // (e.g. for the "add card" preview) before this element is connected
     // to the document, so connectedCallback is too late and leaves
@@ -141,10 +179,17 @@ class NutriplanBridgeCard extends HTMLElement {
       findEntity(hass, cfg.appointment_entity, "_proxima_cita"),
       findEntity(hass, cfg.tracking_entity, "_seguimientos"),
       findEntity(hass, cfg.dietista_entity, "_dietista"),
+      findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer"),
     ];
     const changed = !this._lastEntities || entities.some((e, i) => e !== this._lastEntities[i]);
     this._lastEntities = entities;
-    if (changed) this._safeRender();
+    if (changed) {
+      // The plan/meals sensors changed (poll, or a dish was swapped): any
+      // cached copy of the current plan's week is potentially stale.
+      this._weekCache.delete("current");
+      this._weekError.delete("current");
+      this._safeRender();
+    }
   }
 
   getCardSize() {
@@ -297,6 +342,52 @@ class NutriplanBridgeCard extends HTMLElement {
           background: var(--secondary-background-color, rgba(127,127,127,.06));
           border-radius: 10px; padding: 2px 8px;
         }
+        .header-text { flex: 1; min-width: 0; }
+        .badge {
+          display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+          background: var(--primary-color); color: var(--text-primary-color, #fff);
+          border-radius: 12px; padding: 2px 9px; font-size: 0.8em;
+        }
+        .badge ha-icon { --mdc-icon-size: 14px; }
+        .plan-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+        .plan-nav .plan-name {
+          flex: 1; text-align: center; font-size: 0.85em; color: var(--primary-text-color);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .plan-nav .plan-name small { color: var(--secondary-text-color); }
+        .nav-btn {
+          font: inherit; border: none; border-radius: 50%; width: 30px; height: 30px; flex-shrink: 0;
+          cursor: pointer; color: var(--primary-color);
+          background: var(--secondary-background-color, rgba(127,127,127,.12));
+          display: inline-flex; align-items: center; justify-content: center;
+        }
+        .nav-btn[disabled] { opacity: .3; cursor: default; }
+        .nav-btn ha-icon { --mdc-icon-size: 20px; }
+        .link-btn {
+          font: inherit; font-size: 0.78em; border: none; background: none;
+          color: var(--primary-color); cursor: pointer; padding: 4px 6px;
+        }
+        .days { display: flex; gap: 6px; margin-bottom: 10px; overflow-x: auto; padding-bottom: 2px; }
+        .day-chip {
+          font: inherit; font-size: 0.82em; min-width: 34px; height: 34px; padding: 0 8px;
+          border: none; border-radius: 17px; cursor: pointer; flex-shrink: 0; position: relative;
+          color: var(--primary-text-color);
+          background: var(--secondary-background-color, rgba(127,127,127,.12));
+        }
+        .day-chip.selected { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+        .day-chip.today::after {
+          content: ""; position: absolute; bottom: 3px; left: 50%; margin-left: -2px;
+          width: 4px; height: 4px; border-radius: 50%; background: currentColor;
+        }
+        .readonly-note { font-size: 0.78em; color: var(--secondary-text-color); margin: 0 0 8px 0; font-style: italic; }
+        .day-summary {
+          display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.8em; margin: 0 0 8px 0;
+          color: var(--secondary-text-color);
+        }
+        .day-summary b { color: var(--primary-text-color); font-weight: 500; }
+        .trend { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+        .trend .spark { width: 120px; height: 28px; flex-shrink: 0; }
+        .trend .delta { font-size: 0.82em; color: var(--secondary-text-color); }
         .opciones-plato .plato-row:not(:first-child) { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
       </style>
       <ha-card>
@@ -331,6 +422,37 @@ class NutriplanBridgeCard extends HTMLElement {
     } else {
       img.style.display = "none";
     }
+  }
+
+  _selectDay(day) {
+    this._view.day = day;
+    this._weekError.delete(this._viewKey());
+    this._safeRender();
+  }
+
+  _selectPlan(planId) {
+    this._view.planId = planId;
+    this._weekError.delete(this._viewKey());
+    this._safeRender();
+  }
+
+  _viewKey() {
+    return this._view.planId === null ? "current" : String(this._view.planId);
+  }
+
+  async _loadWeek(key, planId) {
+    this._weekLoading.add(key);
+    try {
+      const data = { };
+      if (planId !== null && planId !== undefined) data.plan_id = planId;
+      const week = await this._callService("obtener_comidas", this._withAccount(data), true);
+      this._weekCache.set(key, week);
+      this._weekError.delete(key);
+    } catch (err) {
+      this._weekError.set(key, err.message || String(err));
+    }
+    this._weekLoading.delete(key);
+    this._safeRender();
   }
 
   _toggle(franja) {
@@ -401,6 +523,7 @@ class NutriplanBridgeCard extends HTMLElement {
         true
       );
       this._changeState.delete(subingestaId);
+      this._weekCache.delete("current");
     } catch (err) {
       this._changeState.set(subingestaId, { status: "error", error: err.message || String(err), franja: prev.franja });
     }
@@ -416,6 +539,24 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleClick(ev) {
+    const dayChip = ev.target.closest(".day-chip");
+    if (dayChip) {
+      this._selectDay(Number(dayChip.dataset.day));
+      return;
+    }
+    const navBtn = ev.target.closest(".nav-btn");
+    if (navBtn) {
+      if (!navBtn.disabled && navBtn.dataset.planId !== undefined) {
+        this._selectPlan(navBtn.dataset.planId === "" ? null : navBtn.dataset.planId);
+      }
+      return;
+    }
+    const currentBtn = ev.target.closest(".link-btn");
+    if (currentBtn) {
+      this._view = { planId: null, day: null };
+      this._safeRender();
+      return;
+    }
     const header = ev.target.closest(".meal-header");
     if (header) {
       this._toggle(header.dataset.franja);
@@ -536,8 +677,9 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _renderPlatoActions(plato, franja) {
-    const stateKey = plato.subingesta_id;
-    if (stateKey === undefined || stateKey === null) return "";
+    if (this._readOnly) return "";
+    if (plato.subingesta_id === undefined || plato.subingesta_id === null) return "";
+    const stateKey = String(plato.subingesta_id);
     const state = this._changeState.get(stateKey) || { status: "idle" };
     const dataAttrs = `data-subingesta="${escapeHtml(stateKey)}" data-plato-id="${escapeHtml(
       plato.plato_id
@@ -626,8 +768,8 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _renderPlatoRow(plato, franja) {
-    const key = plato.subingesta_id;
-    const canExpand = key !== undefined && key !== null;
+    const canExpand = plato.subingesta_id !== undefined && plato.subingesta_id !== null;
+    const key = canExpand ? String(plato.subingesta_id) : undefined;
     const isOpen = canExpand && this._platoExpanded.has(key);
     const thumbSrc = plato.imagen;
     const thumbHtml =
@@ -704,8 +846,17 @@ class NutriplanBridgeCard extends HTMLElement {
     }
 
     const mealsAttrs = (mealsEntity && mealsEntity.attributes) || {};
-    this._planId = mealsAttrs.plan_id;
-    this._dietaIndex = mealsAttrs.dieta_index;
+    const planAttrs = (planEntity && planEntity.attributes) || {};
+    const chatEntity = findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer");
+    const todayIndex = mealsAttrs.dieta_index;
+    const numDietas = Number(planAttrs.num_dietas || mealsAttrs.num_dietas || 0);
+    const planes = Array.isArray(planAttrs.planes) ? planAttrs.planes : [];
+    const currentPlanId = mealsAttrs.plan_id ?? planAttrs.plan_id;
+    const viewingCurrent = this._view.planId === null;
+    const day = this._view.day ?? todayIndex ?? 0;
+    this._readOnly = !viewingCurrent;
+    this._planId = viewingCurrent ? currentPlanId : this._view.planId;
+    this._dietaIndex = day;
     // Needed so the actions below know WHICH configured account a plato
     // belongs to - without it, calling them with more than one Nutriplan
     // Bridge account configured fails ("Multiple accounts are configured;
@@ -718,20 +869,95 @@ class NutriplanBridgeCard extends HTMLElement {
 
     const dietistaAttrs = (dietistaEntity && dietistaEntity.attributes) || {};
     const dietistaName =
-      dietistaEntity && dietistaEntity.state !== "unknown" ? dietistaEntity.state : "Nutriplan Bridge";
+      dietistaEntity && !["unknown", "unavailable"].includes(dietistaEntity.state)
+        ? dietistaEntity.state
+        : "Nutriplan Bridge";
     const dietistaAvatar = dietistaAttrs.avatar;
     const mealLabels = dietistaAttrs.nombres_franjas || {};
 
     const planName =
-      planEntity && planEntity.state !== "unknown" ? planEntity.state : "Sin plan activo";
+      planEntity && !["unknown", "unavailable"].includes(planEntity.state) ? planEntity.state : "Sin plan activo";
 
-    const meals = mealsAttrs.comidas || [];
-    const mealsHtml = meals.length
-      ? `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels)).join("")}</div>`
-      : '<div class="empty">Sin comidas programadas para hoy</div>';
+    let meals = [];
+    let resumen = null;
+    let mealsMessage = null;
+    if (mealsEntity && mealsEntity.state === "unavailable" && viewingCurrent) {
+      mealsMessage = "Sin conexión con DietoPro: datos no disponibles";
+    } else if (viewingCurrent && day === todayIndex) {
+      meals = mealsAttrs.comidas || [];
+      resumen = mealsAttrs.resumen_nutricional;
+    } else {
+      const key = this._viewKey();
+      const week = this._weekCache.get(key);
+      if (week) {
+        const d = (week.dias || [])[day];
+        meals = d ? d.comidas || [] : [];
+        resumen = d && d.resumen_nutricional;
+      } else if (this._weekError.has(key)) {
+        mealsMessage = this._weekError.get(key);
+      } else {
+        mealsMessage = "Cargando…";
+        if (!this._weekLoading.has(key)) this._loadWeek(key, this._view.planId);
+      }
+    }
+
+    const dayName = (i) => (numDietas === 7 ? WEEKDAYS[i] : `Día ${i + 1}`);
+    const isToday = viewingCurrent && day === todayIndex;
+    const viewedPlan = planes.find((p) => String(p.id) === String(this._planId));
+    const sectionTitle = isToday
+      ? "Comidas de hoy"
+      : `${dayName(day)}${viewingCurrent ? "" : ` · ${planLabel(viewedPlan)}`}`;
+
+    let mealsHtml;
+    if (mealsMessage) {
+      mealsHtml = `<div class="empty">${escapeHtml(mealsMessage)}</div>`;
+    } else if (meals.length) {
+      mealsHtml = `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels)).join("")}</div>`;
+    } else {
+      mealsHtml = `<div class="empty">Sin comidas programadas ${isToday ? "para hoy" : "este día"}</div>`;
+    }
+
+    let summaryHtml = "";
+    if (resumen && resumen.energia_kcal) {
+      const parts = [`<span><b>${escapeHtml(Math.round(resumen.energia_kcal))}</b> kcal</span>`];
+      [["proteinas_g", "Prot"], ["grasas_g", "Grasa"], ["carbohidratos_g", "Hidr"]].forEach(([k, l]) => {
+        if (resumen[k] !== undefined && resumen[k] !== null) {
+          parts.push(`<span>${l} <b>${escapeHtml(Math.round(resumen[k]))}</b> g</span>`);
+        }
+      });
+      summaryHtml = `<div class="day-summary">${parts.join("")}</div>`;
+    }
+
+    let daysHtml = "";
+    if (numDietas > 1) {
+      const chips = [];
+      for (let i = 0; i < numDietas; i++) {
+        const label = numDietas === 7 ? WEEKDAYS_SHORT[i] : `D${i + 1}`;
+        chips.push(
+          `<button class="day-chip${i === day ? " selected" : ""}${viewingCurrent && i === todayIndex ? " today" : ""}" data-day="${i}" title="${escapeHtml(dayName(i))}">${label}</button>`
+        );
+      }
+      daysHtml = `<div class="days">${chips.join("")}</div>`;
+    }
+
+    let planNavHtml = "";
+    if (planes.length > 1) {
+      const idx = planes.findIndex((p) => String(p.id) === String(this._planId));
+      const older = idx >= 0 && idx < planes.length - 1 ? planes[idx + 1] : null;
+      const newer = idx > 0 ? planes[idx - 1] : null;
+      const newerTarget = newer ? (String(newer.id) === String(currentPlanId) ? "" : newer.id) : null;
+      planNavHtml = `
+        <div class="plan-nav">
+          <button class="nav-btn" ${older ? `data-plan-id="${escapeHtml(older.id)}"` : "disabled"} title="Plan anterior"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <div class="plan-name">${escapeHtml(planLabel(viewedPlan))} <small>${viewingCurrent ? "(actual)" : `· ${escapeHtml(formatShortDate(viewedPlan && (viewedPlan.enviado || viewedPlan.creado)))}`}</small></div>
+          <button class="nav-btn" ${newer ? `data-plan-id="${escapeHtml(newerTarget)}"` : "disabled"} title="Plan siguiente"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+        </div>
+        ${viewingCurrent ? "" : '<div class="readonly-note">Plan anterior: solo lectura. <button class="link-btn">Volver al plan actual</button></div>'}
+      `;
+    }
 
     let apptHtml = '<div class="empty">Sin próxima cita</div>';
-    if (apptEntity && apptEntity.state && apptEntity.state !== "unknown") {
+    if (apptEntity && apptEntity.state && !["unknown", "unavailable"].includes(apptEntity.state)) {
       const label =
         apptEntity.state === "programada" ? "Cita programada" : formatDate(apptEntity.state);
       apptHtml = `<div class="appointment"><ha-icon icon="mdi:calendar-clock"></ha-icon><span>${escapeHtml(
@@ -754,10 +980,26 @@ class NutriplanBridgeCard extends HTMLElement {
               `<div class="metric"><span class="value">${escapeHtml(a[key])}</span><span class="label">${label}</span></div>`
           )
           .join("")}</div>`;
+        const pesos = (Array.isArray(a.historial) ? a.historial : [])
+          .map((h) => Number(h.peso))
+          .filter((v) => !isNaN(v) && v > 0)
+          .slice(-12);
+        const delta = a.delta_peso;
+        const deltaHtml =
+          typeof delta === "number" && delta !== 0
+            ? `${delta < 0 ? "▼" : "▲"} ${Math.abs(delta)} kg desde la anterior`
+            : "";
+        if (pesos.length >= 2) {
+          metricsHtml += `<div class="trend">${sparkline(pesos)}<span class="delta">${deltaHtml}</span></div>`;
+        } else if (deltaHtml) {
+          metricsHtml += `<div class="trend"><span class="delta">${deltaHtml}</span></div>`;
+        }
       } else {
         metricsHtml = '<div class="empty">Sin seguimientos registrados</div>';
       }
     }
+
+    const unread = chatEntity ? Number(chatEntity.state) || 0 : 0;
 
     const avatarHtml =
       dietistaAvatar && !this._brokenImages.has(dietistaAvatar)
@@ -767,14 +1009,18 @@ class NutriplanBridgeCard extends HTMLElement {
     card.innerHTML = `
       <div class="header">
         ${avatarHtml}
-        <div>
+        <div class="header-text">
           <div class="title">${escapeHtml(planName)}</div>
           <div class="subtitle">${escapeHtml(dietistaName)}</div>
         </div>
+        ${unread > 0 ? `<span class="badge" title="Mensajes sin leer del dietista"><ha-icon icon="mdi:chat-processing"></ha-icon>${unread}</span>` : ""}
       </div>
 
       <div class="section">
-        <div class="section-title">Comidas de hoy</div>
+        ${planNavHtml}
+        <div class="section-title">${escapeHtml(sectionTitle)}</div>
+        ${daysHtml}
+        ${summaryHtml}
         ${mealsHtml}
       </div>
 
@@ -889,3 +1135,4 @@ if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
     description: "Plan actual, comidas de hoy (con receta, ingredientes y cambio/valoración de platos), próxima cita y seguimientos.",
   });
 }
+})();

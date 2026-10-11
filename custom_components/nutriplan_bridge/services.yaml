@@ -140,3 +140,26 @@ cambiar_plato:
       required: true
       selector:
         text:
+
+obtener_comidas:
+  name: Obtener comidas de un plan
+  description: >-
+    Solo lectura. Devuelve todos los días (dietas) de un plan, con sus
+    comidas y el resumen nutricional de cada día. Sin "plan_id" usa el plan
+    actual; con él puedes consultar planes anteriores.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    plan_id:
+      name: ID del plan
+      description: Plan a consultar (ver atributo "planes" del sensor Plan actual).
+      required: false
+      selector:
+        text:

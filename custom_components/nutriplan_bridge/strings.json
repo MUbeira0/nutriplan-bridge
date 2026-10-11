@@ -8,6 +8,13 @@
           "email": "Correo electrónico",
           "password": "Contraseña"
         }
+      },
+      "reauth_confirm": {
+        "title": "Volver a conectar",
+        "description": "La contraseña de {email} ya no es válida. Introduce la nueva.",
+        "data": {
+          "password": "Contraseña"
+        }
       }
     },
     "error": {
@@ -16,7 +23,8 @@
       "unknown": "Error inesperado."
     },
     "abort": {
-      "already_configured": "Esta cuenta ya está configurada."
+      "already_configured": "Esta cuenta ya está configurada.",
+      "reauth_successful": "Cuenta reconectada."
     }
   },
   "options": {

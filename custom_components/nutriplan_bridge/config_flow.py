@@ -50,6 +50,37 @@ class DietoProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]):
+        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        entry = self._reauth_entry
+        if user_input is not None and entry is not None:
+            client = DietoProApiClient(
+                async_get_clientsession(self.hass), entry.data[CONF_EMAIL], user_input[CONF_PASSWORD]
+            )
+            try:
+                await client.async_login()
+            except DietoProAuthError:
+                errors["base"] = "invalid_auth"
+            except DietoProApiError:
+                errors["base"] = "cannot_connect"
+            else:
+                self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_PASSWORD: user_input[CONF_PASSWORD]}
+                )
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            description_placeholders={"email": entry.data[CONF_EMAIL] if entry else ""},
+            errors=errors,
+        )
+
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "DietoProOptionsFlow":
         return DietoProOptionsFlow(config_entry)

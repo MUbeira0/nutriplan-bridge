@@ -19,7 +19,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
 from .coordinator import DietoProDataUpdateCoordinator
-from .sensor import _plato_detail
+from .sensor import _plato_detail, shape_day
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +29,9 @@ SERVICE_MARK_CHAT_READ = "marcar_chat_leido"
 SERVICE_RATE_DISH = "valorar_plato"
 SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
+SERVICE_GET_MEALS = "obtener_comidas"
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 _ENTRY_SCHEMA = {vol.Optional("config_entry_id"): cv.string}
 
@@ -47,6 +50,13 @@ PLATO_OPTIONS_SCHEMA = vol.Schema(
         **_ENTRY_SCHEMA,
         vol.Required("plato_id"): vol.Any(cv.positive_int, cv.string),
         vol.Required("franja"): cv.string,
+    }
+)
+
+GET_MEALS_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Optional("plan_id"): vol.Any(cv.positive_int, cv.string),
     }
 )
 
@@ -233,6 +243,40 @@ async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) ->
     return {"opciones": options}
 
 
+async def _async_handle_get_meals(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Every day (dieta) of a plan, current or a previous one, fully shaped.
+
+    Lets the card browse other days of the week and older plans without the
+    sensor having to carry all of that in its (size-limited) attributes.
+    """
+    coordinator = _resolve_coordinator(hass, call)
+    data = coordinator.data or {}
+    current = data.get("plan_detail") if isinstance(data.get("plan_detail"), dict) else None
+    plan_id = call.data.get("plan_id")
+
+    if current is not None and (plan_id is None or str(plan_id) == str(current.get("id"))):
+        detail = current
+    elif plan_id is None:
+        raise HomeAssistantError("No hay ningún plan activo")
+    else:
+        try:
+            detail = await coordinator.client.async_get_plan_detail(plan_id)
+        except (DietoProApiError, DietoProAuthError) as err:
+            raise _friendly_error("cargar el plan", err) from err
+        if not isinstance(detail, dict):
+            raise HomeAssistantError("DietoPro no ha devuelto ese plan")
+
+    dietas = detail.get("dietas") if isinstance(detail.get("dietas"), list) else []
+    return {
+        "plan_id": detail.get("id"),
+        "titulo": detail.get("title"),
+        "creado": detail.get("created"),
+        "es_actual": current is not None and detail.get("id") == current.get("id"),
+        "num_dietas": len(dietas),
+        "dias": [shape_day(i, d) for i, d in enumerate(dietas)],
+    }
+
+
 async def _async_handle_change_plato(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     coordinator = _resolve_coordinator(hass, call)
     plan_id = _require_int(call, "plan_id", "ID del plan")
@@ -284,6 +328,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _plato_options(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_plato_options(hass, call)
 
+        async def _get_meals(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_get_meals(hass, call)
+
         async def _change_plato(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_change_plato(hass, call)
 
@@ -294,6 +341,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             SERVICE_PLATO_OPTIONS,
             _plato_options,
             schema=PLATO_OPTIONS_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_MEALS,
+            _get_meals,
+            schema=GET_MEALS_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
         hass.services.async_register(

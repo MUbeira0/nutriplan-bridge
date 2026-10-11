@@ -47,7 +47,7 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
         except DietoProAuthError as err:
             raise UpdateFailed(f"Authentication with DietoPro failed: {err}") from err
         except DietoProApiError as err:
-            _LOGGER.debug("DietoPro: could not fetch plans: %s", err)
+            _LOGGER.warning("DietoPro: could not fetch plans: %s", err)
             results["plans"] = None
 
         plan_id = _pick_current_plan_id(results.get("plans") or [])
@@ -73,7 +73,13 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             except DietoProAuthError as err:
                 raise UpdateFailed(f"Authentication with DietoPro failed: {err}") from err
             except DietoProApiError as err:
-                _LOGGER.debug("DietoPro: could not fetch %s: %s", key, err)
+                _LOGGER.warning("DietoPro: could not fetch %s: %s", key, err)
                 results[key] = None
+
+        if all(value is None for value in results.values()):
+            # Every endpoint failed (DietoPro down, network cut...): without
+            # this the update "succeeded" with all-None data, so sensors read
+            # unknown and the card claimed "Sin plan activo" / "Sin comidas".
+            raise UpdateFailed("DietoPro did not return data for any endpoint")
 
         return results

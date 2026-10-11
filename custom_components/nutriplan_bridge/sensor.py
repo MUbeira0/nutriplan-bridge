@@ -122,6 +122,21 @@ def _first_present(data: Any, keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _scan_cita_date(cita: dict) -> datetime | None:
+    """The date field inside "cita" was never confirmed, so when none of
+    CITA_DATE_KEYS matches, take any key that looks date-like (fecha*, date*,
+    inicio, start, hora) whose value actually parses, instead of showing
+    "programada" with no date."""
+    for key, value in cita.items():
+        if isinstance(value, (str, int, float)) and any(
+            hint in key.lower() for hint in ("fecha", "date", "inicio", "start", "hora", "timestamp")
+        ):
+            parsed = _parse_datetime(value)
+            if parsed is not None:
+                return parsed
+    return None
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if not value:
         return None
@@ -229,6 +244,45 @@ def _meal_detail(slot: str, ingesta: Any) -> dict:
     }
 
 
+def shape_meals(dieta: Any) -> list[dict]:
+    """All meal slots of one raw "dieta" (one day/schedule), shaped for the card."""
+    if not isinstance(dieta, dict):
+        return []
+    return [_meal_detail(slot, dieta[slot]) for slot in MEAL_SLOT_KEYS if dieta.get(slot)]
+
+
+def shape_day(index: int, dieta: Any) -> dict:
+    """One day of a plan: its meals plus the nutritional total of the day."""
+    meals = shape_meals(dieta)
+    platos = [p for m in meals for p in (m.get("platos") or [])]
+    return {
+        "dieta_index": index,
+        "horario": dieta.get("nombreHorario") if isinstance(dieta, dict) else None,
+        "comidas": meals,
+        "total_platos": len(platos),
+        "resumen_nutricional": _sum_nutrients([p.get("nutrientes") or {} for p in platos]),
+    }
+
+
+def plan_summaries(plans: Any) -> list[dict]:
+    """Compact list of every plan the patient has (newest first) so the card
+    can offer going back to previous plans."""
+    if not isinstance(plans, list):
+        return []
+    out = [
+        {
+            "id": p.get("id"),
+            "titulo": p.get("title"),
+            "creado": p.get("created"),
+            "enviado": p.get("sentByEmailAt"),
+        }
+        for p in plans
+        if isinstance(p, dict) and p.get("id") is not None
+    ]
+    out.sort(key=lambda p: str(p.get("enviado") or p.get("creado") or ""), reverse=True)
+    return out
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DietoProDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
@@ -276,6 +330,7 @@ class DietoProEntity(CoordinatorEntity[DietoProDataUpdateCoordinator], SensorEnt
 
 class DietoProCurrentPlanSensor(DietoProEntity):
     _attr_icon = "mdi:food-apple"
+    _unrecorded_attributes = frozenset({"raw", "planes"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "plan_actual", "Plan actual")
@@ -304,6 +359,7 @@ class DietoProCurrentPlanSensor(DietoProEntity):
             "creado": plan.get("created"),
             "enviado_por_email": plan.get("sentByEmailAt"),
             "total_planes": len(plans) if isinstance(plans, list) else 0,
+            "planes": plan_summaries(plans),
             "num_dietas": len(plan.get("dietas") or []) if plan.get("dietas") else 0,
             "raw": plan,
         }
@@ -311,6 +367,12 @@ class DietoProCurrentPlanSensor(DietoProEntity):
 
 class DietoProTodayMealsSensor(DietoProEntity):
     """Meal slots (desayuno/comida/cena/...) scheduled for today's weekday in the current plan."""
+
+    # "comidas" (every dish with recipe, ingredients and ~30 nutrients) plus
+    # "raw" is far beyond the recorder's 16 KB attribute limit - HA logs a
+    # warning on every update and refuses to store the state. The card reads
+    # the live state, so there's no reason to push these to the database.
+    _unrecorded_attributes = frozenset({"comidas", "resumen_nutricional", "raw"})
 
     _attr_icon = "mdi:silverware-fork-knife"
 
@@ -349,10 +411,7 @@ class DietoProTodayMealsSensor(DietoProEntity):
         return self._todays_dieta_indexed()[1]
 
     def _meals(self) -> list[dict]:
-        dieta = self._todays_dieta()
-        if not isinstance(dieta, dict):
-            return []
-        return [_meal_detail(slot, dieta[slot]) for slot in MEAL_SLOT_KEYS if dieta.get(slot)]
+        return shape_meals(self._todays_dieta())
 
     @property
     def native_value(self) -> int:
@@ -381,6 +440,7 @@ class DietoProTodayMealsSensor(DietoProEntity):
             "comidas": meals,
             "plan_id": plan.get("id"),
             "dieta_index": dieta_index,
+            "num_dietas": len(self._dietas()),
             "config_entry_id": self._entry.entry_id,
             "raw": dieta,
         }
@@ -404,11 +464,15 @@ class DietoProNextAppointmentSensor(DietoProEntity):
         if not cita:
             return None
         when = _parse_datetime(_first_present(cita, CITA_DATE_KEYS))
+        if when is None:
+            when = _scan_cita_date(cita)
         return when.isoformat() if when else "programada"
 
     @property
     def extra_state_attributes(self) -> dict:
         return {"raw": self._cita()}
+
+    _unrecorded_attributes = frozenset({"raw"})
 
 
 def _clean_seguimiento(item: dict) -> dict:
@@ -459,6 +523,7 @@ class DietoProSeguimientosSensor(DietoProEntity):
     """Body-composition tracking entries (peso, imc, pesoGrasa, ...)."""
 
     _attr_icon = "mdi:chart-line"
+    _unrecorded_attributes = frozenset({"historial", "raw"})
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "seguimientos", "Seguimientos")

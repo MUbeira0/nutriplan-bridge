@@ -93,7 +93,10 @@ Esto crea 10 entidades bajo un dispositivo "Nutriplan Bridge":
 `sensor.nutriplan_bridge_mi_perfil`, `sensor.nutriplan_bridge_estado_eni`,
 `sensor.nutriplan_bridge_valoraciones`, `sensor.nutriplan_bridge_charlas`.
 
-Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+Y cinco acciones (Herramientas de desarrollo → Acciones, o en automatizaciones):
+- `nutriplan_bridge.obtener_comidas` (solo lectura: todos los días de un plan,
+  el actual o uno anterior pasando `plan_id`, con comidas y resumen
+  nutricional de cada día; es lo que usa la tarjeta para navegar)
 - `nutriplan_bridge.marcar_chat_leido`
 - `nutriplan_bridge.valorar_plato` (necesita el `super_plato_id` que trae
   cada plato en el atributo `comidas` del sensor `comidas_hoy`, y una
@@ -138,6 +141,12 @@ Y cuatro acciones (Herramientas de desarrollo → Acciones, o en automatizacione
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
 ## Tarjeta
+
+Novedades (0.22): selector de día (L-D, con el de hoy marcado) para ver
+cualquier día del plan, flechas para ir a **planes anteriores** (solo
+lectura), resumen de kcal y macros del día, aviso de mensajes sin leer del
+dietista y gráfica de evolución del peso con la variación respecto a la
+medición anterior. Si el plan no tiene 7 dietas, los días se llaman "D1, D2...".
 
 Desde el editor de dashboards: "Añadir tarjeta" → busca "Nutriplan Bridge" →
 se añade con un clic (tiene editor visual; las entidades se autodetectan, no
