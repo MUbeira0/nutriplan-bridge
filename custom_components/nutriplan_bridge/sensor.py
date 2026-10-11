@@ -738,6 +738,10 @@ class DietoProChatSensor(DietoProEntity):
 
     _attr_icon = "mdi:chat-processing"
 
+    @property
+    def icon(self) -> str:
+        return "mdi:chat-processing" if self._unread_count() > 0 else "mdi:chat-outline"
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "mensajes_sin_leer", "Mensajes sin leer")
 
@@ -1036,6 +1040,19 @@ class DietoProTodayEnergySensor(DietoProTodayMealsSensor):
         }
 
 
+MEAL_ICONS = {
+    "desayuno": "mdi:coffee",
+    "tentempie1": "mdi:food-apple-outline",
+    "tentempie2": "mdi:food-apple-outline",
+    "comida": "mdi:food",
+    "merienda1": "mdi:cookie",
+    "merienda2": "mdi:cookie",
+    "cena": "mdi:silverware-fork-knife",
+    "recena1": "mdi:moon-waning-crescent",
+    "recena2": "mdi:moon-waning-crescent",
+}
+
+
 class DietoProNextMealSensor(DietoProTodayMealsSensor):
     """The next meal still to come today (by its scheduled "hora")."""
 
@@ -1065,6 +1082,11 @@ class DietoProNextMealSensor(DietoProTodayMealsSensor):
             if hora is not None and hora >= now_t and (best is None or hora < best[1]):
                 best = (meal, hora)
         return best if best else (None, None)
+
+    @property
+    def icon(self) -> str:
+        meal, _ = self._next()
+        return MEAL_ICONS.get(meal["franja"], "mdi:clock-outline") if meal else "mdi:check-circle-outline"
 
     @property
     def native_value(self) -> str:
@@ -1217,6 +1239,15 @@ class DietoProDerivedSensor(DietoProEntity):
         self._attr_icon = icon
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+
+    @property
+    def icon(self) -> str:
+        if self._attr_unique_id.endswith("variacion_peso_30d"):
+            value = self.native_value
+            if isinstance(value, (int, float)) and value:
+                return "mdi:trending-down" if value < 0 else "mdi:trending-up"
+            return "mdi:trending-neutral"
+        return self._attr_icon
 
     @property
     def native_value(self):

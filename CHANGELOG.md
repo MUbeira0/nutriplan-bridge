@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0
+- Marca: icono y logo claro/oscuro. Iconos para todas las acciones y entidades con icono según estado.
+- Tarjeta: accesibilidad (teclado, aria), `getGridOptions` y vista previa, alérgenos como etiquetas, kcal por comida, valoración por plato, estados vacíos y de carga, modo compacto, color de acento.
+- Arreglo: alérgenos que llegan como objetos ya no se muestran como "[object Object]".
+- Capturas en el README. 63 tests.
+
 ## 0.26.0
 - Acciones sacadas de la app oficial v51: `enviar_mensaje`, `citas_disponibles`, `solicitar_cita`, `confirmar_cita`, `cancelar_cita`.
 - Tarjeta: escribir al dietista, pedir y cancelar cita (con confirmación).

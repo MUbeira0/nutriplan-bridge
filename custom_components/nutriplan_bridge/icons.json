@@ -1,0 +1,37 @@
+{
+  "services": {
+    "marcar_chat_leido": {
+      "service": "mdi:message-check"
+    },
+    "valorar_plato": {
+      "service": "mdi:star-plus"
+    },
+    "opciones_plato": {
+      "service": "mdi:format-list-bulleted"
+    },
+    "cambiar_plato": {
+      "service": "mdi:swap-horizontal"
+    },
+    "obtener_comidas": {
+      "service": "mdi:calendar-week"
+    },
+    "lista_compra": {
+      "service": "mdi:cart-arrow-down"
+    },
+    "enviar_mensaje": {
+      "service": "mdi:send"
+    },
+    "citas_disponibles": {
+      "service": "mdi:calendar-search"
+    },
+    "solicitar_cita": {
+      "service": "mdi:calendar-plus"
+    },
+    "confirmar_cita": {
+      "service": "mdi:calendar-check"
+    },
+    "cancelar_cita": {
+      "service": "mdi:calendar-remove"
+    }
+  }
+}

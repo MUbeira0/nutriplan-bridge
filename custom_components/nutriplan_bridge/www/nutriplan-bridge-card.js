@@ -156,6 +156,24 @@ function macroBar(resumen) {
   return `<div class="macro-bar" title="Reparto de calorías: proteínas ${Math.round((p / total) * 100)}% · hidratos ${Math.round((c / total) * 100)}% · grasas ${Math.round((g / total) * 100)}%"><span style="width:${pct(p)}%;background:#43a047"></span><span style="width:${pct(c)}%;background:#fb8c00"></span><span style="width:${pct(g)}%;background:#8e24aa"></span></div><div class="macro-legend"><span><i style="background:#43a047"></i>Proteínas ${Math.round((p / total) * 100)}%</span><span><i style="background:#fb8c00"></i>Hidratos ${Math.round((c / total) * 100)}%</span><span><i style="background:#8e24aa"></i>Grasas ${Math.round((g / total) * 100)}%</span></div>`;
 }
 
+function allergenName(a) {
+  if (typeof a === "string") return a;
+  if (a && typeof a === "object") return a.nombre || a.name || a.label || "";
+  return String(a ?? "");
+}
+
+function allergenChips(list) {
+  const names = (list || []).map(allergenName).filter(Boolean);
+  if (!names.length) return "";
+  return `<div class="meal-alergenos">${names
+    .map((n) => `<span class="chip warn"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${escapeHtml(n)}</span>`)
+    .join("")}</div>`;
+}
+
+function emptyState(icon, text) {
+  return `<div class="empty-state"><ha-icon icon="${icon}"></ha-icon><span>${escapeHtml(text)}</span></div>`;
+}
+
 function pick(obj, keys) {
   if (!obj || typeof obj !== "object") return null;
   for (const k of keys) {
@@ -329,7 +347,12 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 4;
+    return 6;
+  }
+
+  // Sections (grid) dashboards: full width by default, resizable, height follows content.
+  getGridOptions() {
+    return { columns: 12, min_columns: 6, rows: "auto" };
   }
 
   static getStubConfig() {
@@ -579,6 +602,32 @@ class NutriplanBridgeCard extends HTMLElement {
           background: none; color: var(--primary-text-color); border-radius: 14px; padding: 4px 10px; margin: 0 4px 4px 0; cursor: pointer;
         }
         .slot-btn.selected { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); }
+        [tabindex]:focus-visible, button:focus-visible, a:focus-visible, textarea:focus-visible {
+          outline: 2px solid var(--primary-color); outline-offset: 2px;
+        }
+        .chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 12px; padding: 2px 8px; margin: 0 4px 4px 0; font-size: 0.78em; }
+        .chip ha-icon { --mdc-icon-size: 14px; }
+        .chip.warn { color: var(--warning-color, #b26a00); background: rgba(255, 152, 0, .14); }
+        .meal-alergenos { margin-bottom: 6px; }
+        .kcal-pill {
+          font-size: 0.68em; color: var(--secondary-text-color); border: 1px solid var(--divider-color, rgba(127,127,127,.35));
+          border-radius: 10px; padding: 0 6px; flex-shrink: 0; white-space: nowrap;
+        }
+        .stars-mini { font-size: 0.75em; color: #f9a825; margin-left: 6px; }
+        .section-title ha-icon { --mdc-icon-size: 14px; vertical-align: -3px; margin-right: 4px; }
+        .empty-state { display: flex; align-items: center; gap: 8px; color: var(--secondary-text-color); font-size: 0.9em; padding: 6px 0; }
+        .empty-state ha-icon { --mdc-icon-size: 22px; opacity: .7; }
+        .skeleton { height: 38px; border-radius: 10px; margin-bottom: 6px;
+          background: linear-gradient(90deg, rgba(127,127,127,.10) 25%, rgba(127,127,127,.22) 37%, rgba(127,127,127,.10) 63%);
+          background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+        @keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        ha-card.compact { padding: 10px; }
+        ha-card.compact .meal-header { padding: 5px 10px; }
+        ha-card.compact .section { margin-top: 8px; }
+        @media (max-width: 380px) { .kcal-pill { display: none; } }
+        @media (prefers-reduced-motion: reduce) {
+          .skeleton, .progress > div, ha-icon.chevron, ha-icon.chevron.small { animation: none; transition: none; }
+        }
         .trend { cursor: pointer; }
         .bigchart { width: 100%; height: auto; margin-top: 8px; }
         .opciones-plato .plato-row:not(:first-child) { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
@@ -591,6 +640,15 @@ class NutriplanBridgeCard extends HTMLElement {
     // replaced on every render) instead of re-attaching listeners each time.
     this.shadowRoot.addEventListener("click", (ev) => this._handleClick(ev));
     this.shadowRoot.addEventListener("change", (ev) => this._handleChange(ev));
+    // Keyboard: Enter/Space activates anything exposed as a button/checkbox.
+    this.shadowRoot.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      const t = ev.target;
+      if (t && t.matches && t.matches('[role="button"], [role="checkbox"]')) {
+        ev.preventDefault();
+        t.click();
+      }
+    });
     this.shadowRoot.addEventListener("input", (ev) => {
       if (ev.target.classList && ev.target.classList.contains("chat-input")) this._chatDraft = ev.target.value;
       if (ev.target.classList && ev.target.classList.contains("book-note")) this._book.note = ev.target.value;
@@ -1056,10 +1114,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
     let detail = "";
     if (isOpen) {
-      const alergenos =
-        opt.alergenos && opt.alergenos.length
-          ? `<div class="meal-alergenos">Alérgenos: ${opt.alergenos.map(escapeHtml).join(", ")}</div>`
-          : "";
+      const alergenos = allergenChips(opt.alergenos);
       const receta = opt.receta
         ? `<div class="meal-receta">${escapeHtml(opt.receta)}</div>`
         : '<div class="empty">No requiere preparación</div>';
@@ -1096,7 +1151,7 @@ class NutriplanBridgeCard extends HTMLElement {
 
     return `
       <div class="plato-row">
-        <div class="plato-summary opcion-summary" data-subingesta="${escapeHtml(
+        <div class="plato-summary opcion-summary" role="button" tabindex="0" aria-expanded="${isOpen}" data-subingesta="${escapeHtml(
           subingestaId
         )}" data-option-id="${escapeHtml(optionId)}">
           ${thumb}
@@ -1155,7 +1210,7 @@ class NutriplanBridgeCard extends HTMLElement {
         : '<div class="plato-img-placeholder"><ha-icon icon="mdi:food"></ha-icon></div>';
     const metaParts = [];
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
-    if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} comensales`);
+    if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} ${Number(plato.comensales) === 1 ? "comensal" : "comensales"}`);
     if (plato.duracion_min) metaParts.push(`${escapeHtml(plato.duracion_min)} min`);
     const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
 
@@ -1171,10 +1226,7 @@ class NutriplanBridgeCard extends HTMLElement {
           .join("")}</div>`
       : "";
 
-    const alergenos =
-      plato.alergenos && plato.alergenos.length
-        ? `<div class="meal-alergenos">Alérgenos: ${plato.alergenos.map(escapeHtml).join(", ")}</div>`
-        : "";
+    const alergenos = allergenChips(plato.alergenos);
 
     const receta = plato.receta
       ? `<div class="meal-receta">${escapeHtml(plato.receta)}</div>`
@@ -1218,11 +1270,11 @@ class NutriplanBridgeCard extends HTMLElement {
 
     return `
       <div class="plato-row">
-        <div class="plato-summary" data-plato-toggle="${escapeHtml(key)}">
+        <div class="plato-summary" data-plato-toggle="${escapeHtml(key)}"${canExpand ? ` role="button" tabindex="0" aria-expanded="${isOpen}"` : ""}>
           ${thumbHtml}
           <div class="plato-summary-text">
             <div class="plato-summary-nombre">${escapeHtml(plato.nombre || "Sin especificar")}</div>
-            ${kcal}
+            ${kcal}${Number(plato.rating) > 0 ? `<span class="stars-mini" title="Tu valoración">★ ${escapeHtml(Math.round(Number(plato.rating) * 10) / 10)}</span>` : ""}
           </div>
           ${canExpand ? `<ha-icon class="chevron small${isOpen ? " expanded" : ""}" icon="mdi:chevron-down"></ha-icon>` : ""}
         </div>
@@ -1255,18 +1307,19 @@ class NutriplanBridgeCard extends HTMLElement {
     const isEaten = ctx.eatenEnabled && this._eaten.has(franja);
     const isPast = ctx.pastFranjas && ctx.pastFranjas.has(franja) && !isNext;
     const eatenHtml = ctx.eatenEnabled
-      ? `<ha-icon class="eaten-toggle${isEaten ? " done" : ""}" data-franja="${escapeHtml(franja)}" icon="${
+      ? `<ha-icon class="eaten-toggle${isEaten ? " done" : ""}" data-franja="${escapeHtml(franja)}" role="checkbox" tabindex="0" aria-checked="${!!isEaten}" aria-label="Marcar como tomada" icon="${
           isEaten ? "mdi:check-circle" : "mdi:circle-outline"
         }" title="Marcar como tomada"></ha-icon>`
       : "";
 
     return `
       <div class="meal-card${isNext ? " next" : ""}${isPast || isEaten ? " past" : ""}">
-        <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}">
+        <div class="meal-header${isOpen ? " expanded" : ""}" data-franja="${escapeHtml(franja)}" role="button" tabindex="0" aria-expanded="${isOpen}">
           ${thumbHtml}
           <span class="franja">${label}${meal.hora ? ` · ${escapeHtml(meal.hora)}` : ""}</span>
           ${isNext ? '<span class="next-tag">Siguiente</span>' : ""}
           <span class="plato">${escapeHtml(summary)}</span>
+          ${mealKcal(meal) ? `<span class="kcal-pill">${Math.round(mealKcal(meal))} kcal</span>` : ""}
           ${eatenHtml}
           <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
         </div>
@@ -1295,6 +1348,9 @@ class NutriplanBridgeCard extends HTMLElement {
     }
 
     const mealsAttrs = (mealsEntity && mealsEntity.attributes) || {};
+    if (cfg.accent_color) card.style.setProperty("--primary-color", cfg.accent_color);
+    else card.style.removeProperty("--primary-color");
+    card.classList.toggle("compact", cfg.compact === true);
     const planAttrs = (planEntity && planEntity.attributes) || {};
     const chatEntity = findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer");
     const todayIndex = mealsAttrs.dieta_index;
@@ -1360,7 +1416,10 @@ class NutriplanBridgeCard extends HTMLElement {
 
     let mealsHtml;
     if (mealsMessage) {
-      mealsHtml = `<div class="empty">${escapeHtml(mealsMessage)}</div>`;
+      mealsHtml =
+        mealsMessage === "Cargando…"
+          ? '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>'
+          : emptyState(/conexi|error|No se/i.test(mealsMessage) ? "mdi:cloud-off-outline" : "mdi:information-outline", mealsMessage);
     } else if (meals.length) {
       const ctx = { eatenEnabled: isToday && cfg.hide_eaten !== true };
       if (isToday) {
@@ -1383,7 +1442,7 @@ class NutriplanBridgeCard extends HTMLElement {
         }
       }
     } else {
-      mealsHtml = `<div class="empty">Sin comidas programadas ${isToday ? "para hoy" : "este día"}</div>`;
+      mealsHtml = emptyState("mdi:food-off-outline", `Sin comidas programadas ${isToday ? "para hoy" : "este día"}`);
     }
 
     let summaryHtml = "";
@@ -1420,7 +1479,7 @@ class NutriplanBridgeCard extends HTMLElement {
               )
               .join("");
             const isTodayRow = viewingCurrent && i === todayIndex;
-            return `<div class="week-day${i === day ? " selected" : ""}" data-day="${i}"><div class="week-day-head"><span>${escapeHtml(
+            return `<div class="week-day${i === day ? " selected" : ""}" data-day="${i}" role="button" tabindex="0"><div class="week-day-head"><span>${escapeHtml(
               dayName(i)
             )}${isTodayRow ? " <small>hoy</small>" : ""}</span><span>${kcal ? Math.round(kcal) + " kcal" : ""}</span></div>${lines}</div>`;
           })
@@ -1439,7 +1498,7 @@ class NutriplanBridgeCard extends HTMLElement {
       for (let i = 0; i < numDietas; i++) {
         const label = numDietas === 7 ? WEEKDAYS_SHORT[i] : `D${i + 1}`;
         chips.push(
-          `<button class="day-chip${i === day ? " selected" : ""}${viewingCurrent && i === todayIndex ? " today" : ""}" data-day="${i}" title="${escapeHtml(dayName(i))}">${label}</button>`
+          `<button class="day-chip${i === day ? " selected" : ""}${viewingCurrent && i === todayIndex ? " today" : ""}" data-day="${i}" title="${escapeHtml(dayName(i))}" aria-label="${escapeHtml(dayName(i))}" aria-pressed="${i === day}">${label}</button>`
         );
       }
       daysHtml = `<div class="days">${chips.join("")}</div>`;
@@ -1453,15 +1512,15 @@ class NutriplanBridgeCard extends HTMLElement {
       const newerTarget = newer ? (String(newer.id) === String(currentPlanId) ? "" : newer.id) : null;
       planNavHtml = `
         <div class="plan-nav">
-          <button class="nav-btn" ${older ? `data-plan-id="${escapeHtml(older.id)}"` : "disabled"} title="Plan anterior"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <button class="nav-btn" ${older ? `data-plan-id="${escapeHtml(older.id)}"` : "disabled"} title="Plan anterior" aria-label="Plan anterior"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
           <div class="plan-name">${escapeHtml(planLabel(viewedPlan))} <small>${viewingCurrent ? "(actual)" : `· ${escapeHtml(formatShortDate(viewedPlan && (viewedPlan.inicio || viewedPlan.enviado || viewedPlan.creado)))}`}</small></div>
-          <button class="nav-btn" ${newer ? `data-plan-id="${escapeHtml(newerTarget)}"` : "disabled"} title="Plan siguiente"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+          <button class="nav-btn" ${newer ? `data-plan-id="${escapeHtml(newerTarget)}"` : "disabled"} title="Plan siguiente" aria-label="Plan siguiente"><ha-icon icon="mdi:chevron-right"></ha-icon></button>
         </div>
         ${viewingCurrent ? "" : '<div class="readonly-note">Estás viendo otro plan: solo lectura. <button class="link-btn">Volver al plan actual</button></div>'}
       `;
     }
 
-    let apptHtml = '<div class="empty">Sin próxima cita</div>';
+    let apptHtml = emptyState("mdi:calendar-blank-outline", "Sin próxima cita");
     if (apptEntity && apptEntity.state && !["unknown", "unavailable"].includes(apptEntity.state)) {
       const label =
         apptEntity.state === "programada" ? "Cita programada" : formatDate(apptEntity.state);
@@ -1636,7 +1695,7 @@ class NutriplanBridgeCard extends HTMLElement {
       } else {
         body = scopeBtns;
       }
-      shopHtml = `<div class="section"><div class="section-title">Lista de la compra</div>${body}</div>`;
+      shopHtml = `<div class="section"><div class="section-title"><ha-icon icon="mdi:cart-outline"></ha-icon>Lista de la compra</div>${body}</div>`;
     }
 
     const avatarHtml =
@@ -1667,7 +1726,7 @@ class NutriplanBridgeCard extends HTMLElement {
       <div class="section">
         ${planNavHtml}
         <div class="section-head">
-          <div class="section-title">${escapeHtml(this._weekView ? "Semana completa" : sectionTitle)}</div>
+          <div class="section-title"><ha-icon icon="${this._weekView ? "mdi:calendar-week" : "mdi:silverware-fork-knife"}"></ha-icon>${escapeHtml(this._weekView ? "Semana completa" : sectionTitle)}</div>
           <span>
             ${viewingCurrent && !isToday && todayIndex !== undefined && !this._weekView ? '<button class="link-btn">Volver a hoy</button>' : ""}
             ${numDietas > 1 ? `<button class="link-btn week-toggle">${this._weekView ? "Vista día" : "Vista semana"}</button>` : ""}
@@ -1680,7 +1739,7 @@ class NutriplanBridgeCard extends HTMLElement {
         cfg.hide_appointment === true
           ? ""
           : `<div class="section">
-        <div class="section-title">Próxima cita</div>
+        <div class="section-title"><ha-icon icon="mdi:calendar-clock"></ha-icon>Próxima cita</div>
         ${apptHtml}
         ${apptActionsHtml}
       </div>`
@@ -1691,7 +1750,7 @@ class NutriplanBridgeCard extends HTMLElement {
       ${
         trackingEntity && cfg.hide_tracking !== true
           ? `<div class="section">
-              <div class="section-title">Último seguimiento</div>
+              <div class="section-title"><ha-icon icon="mdi:chart-line"></ha-icon>Último seguimiento</div>
               ${metricsHtml}
             </div>`
           : ""
@@ -1722,6 +1781,8 @@ const EDITOR_SCHEMA = [
   { name: "hide_shopping", label: "Ocultar lista de la compra", selector: { boolean: {} } },
   { name: "hide_macros", label: "Ocultar reparto de macros", selector: { boolean: {} } },
   { name: "hide_eaten", label: "Ocultar marcar comidas como tomadas", selector: { boolean: {} } },
+  { name: "compact", label: "Modo compacto (menos espacio)", selector: { boolean: {} } },
+  { name: "accent_color", label: "Color de acento (p. ej. #43a047, opcional)", selector: { text: {} } },
   { name: "hide_contact", label: "Ocultar botones de llamar/escribir al dietista", selector: { boolean: {} } },
   { name: "hide_chat", label: "Ocultar el icono de mensajes (si no hay mensajes sin leer)", selector: { boolean: {} } },
   { name: "hide_chat_compose", label: "Ocultar la caja para escribir al dietista", selector: { boolean: {} } },
@@ -1787,6 +1848,8 @@ if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
   window.customCards.push({
     type: "nutriplan-bridge-card",
     name: "Nutriplan Bridge",
+    preview: true,
+    documentationURL: "https://github.com/MUbeira0/nutriplan-bridge",
     description: "Plan actual y planes anteriores, comidas por día con siguiente comida, progreso de calorías, macros, lista de la compra, próxima cita y seguimiento del peso.",
   });
 }

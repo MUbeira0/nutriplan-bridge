@@ -40,12 +40,22 @@ class _DietoProBinary(CoordinatorEntity[DietoProDataUpdateCoordinator], BinarySe
         self._attr_icon = icon
         self._attr_device_info = build_device_info(entry)
 
+    _icon_on = "mdi:bell-ring"
+    _icon_off = "mdi:bell-outline"
+
+    @property
+    def icon(self) -> str:
+        return self._icon_on if self.is_on else self._icon_off
+
     @property
     def _data(self) -> dict:
         return self.coordinator.data or {}
 
 
 class UnreadMessagesBinary(_DietoProBinary):
+    _icon_on = "mdi:message-badge"
+    _icon_off = "mdi:message-outline"
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "hay_mensajes", "Mensajes pendientes", "mdi:message-badge")
 
@@ -60,6 +70,9 @@ class UnreadMessagesBinary(_DietoProBinary):
 
 class AppointmentSoonBinary(_DietoProBinary):
     """On when the appointment is within the next 24 hours."""
+
+    _icon_on = "mdi:calendar-alert"
+    _icon_off = "mdi:calendar-clock"
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "cita_proxima", "Cita en 24 h", "mdi:calendar-alert")
@@ -91,6 +104,9 @@ class AppointmentSoonBinary(_DietoProBinary):
 class NewPlanBinary(_DietoProBinary):
     """On while the patient already has a plan that starts in the future."""
 
+    _icon_on = "mdi:calendar-star"
+    _icon_off = "mdi:calendar-blank-outline"
+
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "plan_nuevo", "Plan nuevo pendiente", "mdi:calendar-star")
 
@@ -118,6 +134,9 @@ class NewPlanBinary(_DietoProBinary):
 
 class MeasurementDueBinary(_DietoProBinary):
     """On when the last body measurement is older than a week."""
+
+    _icon_on = "mdi:scale-balance"
+    _icon_off = "mdi:scale-bathroom"
 
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry, "medicion_pendiente", "Medición pendiente", "mdi:scale-bathroom")

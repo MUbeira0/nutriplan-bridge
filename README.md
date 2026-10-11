@@ -5,6 +5,16 @@ para una app de pacientes de nutrición, con sensores de **plan/comidas del
 día** y **próxima cita/seguimientos**, más una tarjeta Lovelace
 (`nutriplan-bridge-card`) que se registra sola, sin tocar `resources:` a mano.
 
+
+<p align="center">
+  <img src="docs/screenshots/light_day.png" width="300" alt="Tarjeta, tema claro">
+  <img src="docs/screenshots/dark_day.png" width="300" alt="Tarjeta, tema oscuro">
+</p>
+<p align="center">
+  <img src="docs/screenshots/dark_meal.png" width="300" alt="Detalle de un plato">
+  <img src="docs/screenshots/dark_week.png" width="300" alt="Vista de la semana completa">
+</p>
+
 ## Cómo se obtuvo el contrato de la API
 
 No es una integración "a ciegas". La app oficial es React Native + Expo
@@ -148,6 +158,18 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   falla, no es cosa de esta integración.
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
+
+## Novedades 0.27
+
+- **Imagen de marca:** icono y logo (claro/oscuro) en `brand/`.
+- **Iconos de acciones** (`icons.json`) y **iconos que cambian con el estado**:
+  la próxima comida (café, comida, cena...), la variación de peso (↘/↗), el chat
+  y los binary sensors (campana, mensaje, calendario...).
+- **Tarjeta:** accesible con teclado (Tab, Enter/Espacio) y lectores de
+  pantalla, tamaño y redimensionado en las vistas por secciones, vista previa
+  en el selector de tarjetas, alérgenos como etiquetas con icono, calorías por
+  comida, valoración en cada plato, estados vacíos/de carga con icono, modo
+  compacto y color de acento.
 
 ## Novedades 0.26 (rastreadas en la app oficial v51.0.0)
 
