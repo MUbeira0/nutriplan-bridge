@@ -21,4 +21,4 @@ BASE_URL = "https://dietopro.com"
 CONF_UPDATE_INTERVAL = "update_interval"
 DEFAULT_UPDATE_INTERVAL = 15  # minutes
 
-PLATFORMS = ["sensor", "calendar"]
+PLATFORMS = ["sensor", "calendar", "binary_sensor", "button", "todo"]

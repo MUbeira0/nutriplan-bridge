@@ -10,6 +10,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +50,18 @@ def _as_date(value: object) -> date | None:
     if parsed is not None:
         return parsed.date()
     return dt_util.parse_date(str(value))
+
+
+def unread_count(data: dict | None) -> int:
+    """Unread chat messages out of the raw coordinator data."""
+    raw = (data or {}).get("chat_unread")
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    if isinstance(raw, dict):
+        for key in ("unread", "count", "total", "unreadCount"):
+            if isinstance(raw.get(key), (int, float)):
+                return int(raw[key])
+    return 0
 
 
 def dieta_index_for(day: date, count: int, start: date | None) -> int | None:
@@ -105,7 +118,9 @@ def _pick_current_plan_id(plans: list) -> object | None:
 class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
     """Fetches plan (+ detail), next appointment, seguimientos and dietista."""
 
-    def __init__(self, hass: HomeAssistant, client: DietoProApiClient, update_interval_minutes: int) -> None:
+    def __init__(
+        self, hass: HomeAssistant, client: DietoProApiClient, update_interval_minutes: int, entry_id: str | None = None
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -113,6 +128,31 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             update_interval=timedelta(minutes=update_interval_minutes),
         )
         self.client = client
+        self._entry_id = entry_id
+
+    def _fire_change_events(self, new: dict) -> None:
+        """Bus events for automations: a different plan took effect, a new
+        chat message arrived, or the appointment changed. Only fired when
+        there is previous data to compare with (never on the first load)."""
+        old = self.data
+        if not old or not self._entry_id:
+            return
+        base = {"entry_id": self._entry_id}
+
+        def plan(d: dict) -> dict:
+            detail = d.get("plan_detail")
+            return detail if isinstance(detail, dict) else {}
+
+        old_id, new_id = plan(old).get("id"), plan(new).get("id")
+        if old_id is not None and new_id is not None and old_id != new_id:
+            self.hass.bus.async_fire(
+                f"{DOMAIN}_plan_changed",
+                {**base, "plan_id": new_id, "previous_plan_id": old_id, "title": plan(new).get("title")},
+            )
+        if unread_count(new) > unread_count(old):
+            self.hass.bus.async_fire(f"{DOMAIN}_new_message", {**base, "unread": unread_count(new)})
+        if new.get("cita") != old.get("cita") and new.get("cita"):
+            self.hass.bus.async_fire(f"{DOMAIN}_appointment_changed", {**base, "cita": new.get("cita")})
 
     async def _async_update_data(self) -> dict:
         results: dict = {}
@@ -157,4 +197,5 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             # unknown and the card claimed "Sin plan activo" / "Sin comidas".
             raise UpdateFailed("DietoPro did not return data for any endpoint")
 
+        self._fire_change_events(results)
         return results

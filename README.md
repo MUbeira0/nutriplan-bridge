@@ -143,6 +143,28 @@ Y seis acciones (Herramientas de desarrollo → Acciones, o en automatizaciones)
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.24
+
+- **Lista de la compra nativa:** `todo.…_lista_de_la_compra` con los
+  ingredientes de todo el plan (se pueden marcar; se recuerdan por plan), lista
+  para la tarjeta de tareas de Home Assistant o para el asistente de voz.
+- **Binary sensors** para automatizaciones: mensajes pendientes, cita en
+  menos de 24 h, plan nuevo pendiente (ya hay uno que empieza en el futuro) y
+  medición pendiente (más de 7 días sin pesarte).
+- **Más sensores:** proteínas, grasas, hidratos y fibra de hoy (g), objetivo
+  calórico diario y peso objetivo (de la encuesta inicial), peso que falta
+  para el objetivo, variación de peso en 30 días y días desde la última
+  medición.
+- **Botones:** "Actualizar ahora" y "Marcar chat como leído".
+- **Eventos en el bus** para automatizaciones: `nutriplan_bridge_plan_changed`
+  (plan_id, previous_plan_id, title), `nutriplan_bridge_new_message`
+  (unread) y `nutriplan_bridge_appointment_changed` (cita).
+- **Tarjeta:** vista de la semana completa, deslizar a izquierda/derecha para
+  cambiar de día, tabla de nutrientes por plato, botones para llamar/escribir
+  al dietista, panel de mensajes con "marcar como leído", gráfica ampliable del
+  peso (toca la gráfica pequeña), botón de copiar/compartir la lista de la
+  compra y opciones para ocultar contacto y fotos.
+
 ## Novedades 0.23
 
 - **Sensores numéricos con histórico:** `peso`, `imc`, `grasa_corporal`,

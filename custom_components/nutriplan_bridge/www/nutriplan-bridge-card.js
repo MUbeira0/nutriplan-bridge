@@ -156,6 +156,60 @@ function macroBar(resumen) {
   return `<div class="macro-bar" title="Reparto de calorías: proteínas ${Math.round((p / total) * 100)}% · hidratos ${Math.round((c / total) * 100)}% · grasas ${Math.round((g / total) * 100)}%"><span style="width:${pct(p)}%;background:#43a047"></span><span style="width:${pct(c)}%;background:#fb8c00"></span><span style="width:${pct(g)}%;background:#8e24aa"></span></div><div class="macro-legend"><span><i style="background:#43a047"></i>Proteínas ${Math.round((p / total) * 100)}%</span><span><i style="background:#fb8c00"></i>Hidratos ${Math.round((c / total) * 100)}%</span><span><i style="background:#8e24aa"></i>Grasas ${Math.round((g / total) * 100)}%</span></div>`;
 }
 
+function pick(obj, keys) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const k of keys) {
+    if (typeof obj[k] === "string" && obj[k].trim()) return obj[k].trim();
+  }
+  return null;
+}
+
+function bigChart(hist) {
+  const pts = hist.filter((h) => Number(h.peso) > 0).slice(-30);
+  if (pts.length < 2) return "";
+  const w = 300;
+  const h = 130;
+  const padL = 34;
+  const padB = 20;
+  const vals = pts.map((p) => Number(p.peso));
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const x = (i) => padL + (i / (pts.length - 1)) * (w - padL - 6);
+  const y = (v) => 8 + (1 - (v - min) / span) * (h - padB - 16);
+  const line = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const dots = vals.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="2.5" fill="var(--primary-color)"/>`).join("");
+  return `<svg class="bigchart" viewBox="0 0 ${w} ${h}">
+    <line x1="${padL}" y1="${y(max)}" x2="${w - 6}" y2="${y(max)}" stroke="var(--divider-color, rgba(127,127,127,.3))" stroke-dasharray="3 3"/>
+    <line x1="${padL}" y1="${y(min)}" x2="${w - 6}" y2="${y(min)}" stroke="var(--divider-color, rgba(127,127,127,.3))" stroke-dasharray="3 3"/>
+    <text x="2" y="${y(max) + 4}" font-size="10" fill="var(--secondary-text-color)">${max}</text>
+    <text x="2" y="${y(min) + 4}" font-size="10" fill="var(--secondary-text-color)">${min}</text>
+    <polyline points="${line}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round"/>${dots}
+    <text x="${padL}" y="${h - 4}" font-size="10" fill="var(--secondary-text-color)">${escapeHtml(formatShortDate(pts[0].fecha))}</text>
+    <text x="${w - 6}" y="${h - 4}" font-size="10" text-anchor="end" fill="var(--secondary-text-color)">${escapeHtml(formatShortDate(pts[pts.length - 1].fecha))}</text>
+  </svg>`;
+}
+
+const NUTRIENT_ROWS = [
+  ["energia_kcal", "Energía", "kcal"],
+  ["proteinas_g", "Proteínas", "g"],
+  ["grasas_g", "Grasas", "g"],
+  ["grasas_saturadas_g", "Saturadas", "g"],
+  ["carbohidratos_g", "Hidratos", "g"],
+  ["azucares_g", "Azúcares", "g"],
+  ["fibra_g", "Fibra", "g"],
+  ["sodio_mg", "Sodio", "mg"],
+];
+
+function nutrientGrid(nutr) {
+  if (!nutr) return "";
+  const cells = NUTRIENT_ROWS.filter(([k]) => typeof nutr[k] === "number" && nutr[k] > 0).map(
+    ([k, label, unit]) =>
+      `<div class="nutri"><span class="nutri-v">${Math.round(nutr[k] * 10) / 10}<small> ${unit}</small></span><span class="nutri-l">${label}</span></div>`
+  );
+  return cells.length ? `<div class="nutri-grid">${cells.join("")}</div>` : "";
+}
+
 function sparkline(values) {
   if (values.length < 2) return "";
   const w = 120;
@@ -222,6 +276,10 @@ class NutriplanBridgeCard extends HTMLElement {
     this._weekLoading = new Set();
     this._weekError = new Map();
     this._eaten = loadEaten();
+    this._weekView = false;
+    this._chatOpen = false;
+    this._chartOpen = false;
+    this._numDietas = 0;
     // Shopping list panel: { scope: "week"|"day", status, items, error, todoMsg }
     this._shop = { scope: null, status: "idle" };
     // Attach the shadow root immediately: Lovelace can call setConfig()
@@ -485,6 +543,26 @@ class NutriplanBridgeCard extends HTMLElement {
         .shop-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 0.88em; color: var(--primary-text-color); cursor: pointer; }
         .shop-item.checked span.shop-name { text-decoration: line-through; opacity: .5; }
         .shop-item .shop-qty { margin-left: auto; color: var(--secondary-text-color); font-size: 0.9em; white-space: nowrap; }
+        .nutri-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 8px 0; }
+        .nutri { display: flex; flex-direction: column; align-items: center; background: var(--secondary-background-color, rgba(127,127,127,.08)); border-radius: 8px; padding: 4px 2px; }
+        .nutri-v { font-size: 0.85em; color: var(--primary-text-color); }
+        .nutri-v small { color: var(--secondary-text-color); font-size: 0.8em; }
+        .nutri-l { font-size: 0.66em; color: var(--secondary-text-color); }
+        .week-day { border-radius: 10px; background: var(--secondary-background-color, rgba(127,127,127,.08)); padding: 8px 12px; margin-bottom: 6px; cursor: pointer; }
+        .week-day.selected { box-shadow: inset 3px 0 0 var(--primary-color); }
+        .week-day-head { display: flex; justify-content: space-between; font-size: 0.88em; font-weight: 500; color: var(--primary-text-color); margin-bottom: 2px; }
+        .week-day-head small { color: var(--primary-color); font-weight: 400; }
+        .week-meal { font-size: 0.78em; color: var(--secondary-text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .week-meal b { color: var(--primary-text-color); font-weight: 500; }
+        .head-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+        a.contact { color: var(--primary-color); display: inline-flex; padding: 4px; text-decoration: none; }
+        a.contact ha-icon { --mdc-icon-size: 20px; }
+        button.badge { border: none; font: inherit; font-size: 0.8em; cursor: pointer; }
+        .chat-panel { background: var(--secondary-background-color, rgba(127,127,127,.08)); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+        .chat-msg { font-size: 0.85em; color: var(--primary-text-color); padding: 4px 0; white-space: pre-line; }
+        .chat-msg small { display: block; color: var(--secondary-text-color); font-size: 0.8em; }
+        .trend { cursor: pointer; }
+        .bigchart { width: 100%; height: auto; margin-top: 8px; }
         .opciones-plato .plato-row:not(:first-child) { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
       </style>
       <ha-card>
@@ -495,6 +573,31 @@ class NutriplanBridgeCard extends HTMLElement {
     // replaced on every render) instead of re-attaching listeners each time.
     this.shadowRoot.addEventListener("click", (ev) => this._handleClick(ev));
     this.shadowRoot.addEventListener("change", (ev) => this._handleChange(ev));
+    // Swipe left/right over the meal list to move to the next/previous day.
+    let sx = null;
+    let sy = null;
+    this.shadowRoot.addEventListener(
+      "touchstart",
+      (ev) => {
+        sx = ev.changedTouches[0].clientX;
+        sy = ev.changedTouches[0].clientY;
+      },
+      { passive: true }
+    );
+    this.shadowRoot.addEventListener(
+      "touchend",
+      (ev) => {
+        if (sx === null) return;
+        const dx = ev.changedTouches[0].clientX - sx;
+        const dy = ev.changedTouches[0].clientY - sy;
+        sx = null;
+        if (Math.abs(dx) < 70 || Math.abs(dy) > 40 || this._numDietas < 2) return;
+        if (!ev.target.closest || !ev.target.closest(".meals")) return;
+        const next = Math.max(0, Math.min(this._numDietas - 1, (this._dietaIndex ?? 0) + (dx < 0 ? 1 : -1)));
+        if (next !== this._dietaIndex) this._selectDay(next);
+      },
+      { passive: true }
+    );
     // "error" on <img> doesn't bubble, so this only works with capture:true.
     this.shadowRoot.addEventListener("error", (ev) => this._handleImageError(ev), true);
   }
@@ -596,6 +699,40 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
+  _imgOk(src) {
+    return !!src && !this._brokenImages.has(src) && (this._config || {}).hide_images !== true;
+  }
+
+  async _copyShopping() {
+    const items = (this._shop && this._shop.items) || [];
+    const checked = loadChecked(this._shopStorageKey());
+    const text =
+      "Lista de la compra\n" +
+      items
+        .filter((it) => !checked.has(it.nombre))
+        .map((it) => `- ${it.nombre}${it.cantidad_g ? ` (${it.cantidad_g} g)` : ""}`)
+        .join("\n");
+    let msg = "Lista copiada al portapapeles.";
+    try {
+      if (navigator.share && /Mobi|Android/i.test(navigator.userAgent)) await navigator.share({ text });
+      else await navigator.clipboard.writeText(text);
+    } catch (e) {
+      msg = "No se pudo copiar la lista.";
+    }
+    this._shop = { ...this._shop, todoMsg: msg };
+    this._safeRender();
+  }
+
+  async _markChatRead() {
+    try {
+      await this._callService("marcar_chat_leido", this._withAccount({}));
+    } catch (err) {
+      console.error("nutriplan-bridge-card: marcar_chat_leido failed", err);
+    }
+    this._chatOpen = false;
+    this._safeRender();
+  }
+
   _toggle(franja) {
     if (this._expanded.has(franja)) {
       this._expanded.delete(franja);
@@ -680,6 +817,35 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleClick(ev) {
+    if (ev.target.closest(".week-toggle")) {
+      this._weekView = !this._weekView;
+      this._safeRender();
+      return;
+    }
+    const weekDay = ev.target.closest(".week-day");
+    if (weekDay) {
+      this._weekView = false;
+      this._selectDay(Number(weekDay.dataset.day));
+      return;
+    }
+    if (ev.target.closest(".chat-toggle")) {
+      this._chatOpen = !this._chatOpen;
+      this._safeRender();
+      return;
+    }
+    if (ev.target.closest(".chat-read")) {
+      this._markChatRead();
+      return;
+    }
+    if (ev.target.closest(".trend")) {
+      this._chartOpen = !this._chartOpen;
+      this._safeRender();
+      return;
+    }
+    if (ev.target.closest(".shop-copy")) {
+      this._copyShopping();
+      return;
+    }
     const eatenBtn = ev.target.closest(".eaten-toggle");
     if (eatenBtn) {
       this._toggleEaten(eatenBtn.dataset.franja);
@@ -775,7 +941,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const optionId = opt.plato_id;
     const isOpen = expandedOptionId !== null && String(expandedOptionId) === String(optionId);
     const thumb =
-      opt.imagen && !this._brokenImages.has(opt.imagen)
+      this._imgOk(opt.imagen)
         ? `<img class="meal-thumb" data-fallback-icon="mdi:food" src="${escapeHtml(opt.imagen)}" alt="" loading="lazy" />`
         : `<ha-icon class="meal-type" icon="mdi:food"></ha-icon>`;
     const kcal = opt.calorias ? `<div class="plato-summary-kcal">${escapeHtml(opt.calorias)} kcal</div>` : "";
@@ -874,8 +1040,10 @@ class NutriplanBridgeCard extends HTMLElement {
 
   _renderPlatoDetail(plato, franja) {
     const img =
-      plato.imagen && !this._brokenImages.has(plato.imagen)
+      this._imgOk(plato.imagen)
         ? `<img class="plato-img" src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
+        : (this._config || {}).hide_images === true
+        ? ""
         : '<div class="plato-img-placeholder"><ha-icon icon="mdi:food"></ha-icon></div>';
     const metaParts = [];
     if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
@@ -919,6 +1087,7 @@ class NutriplanBridgeCard extends HTMLElement {
       <div class="plato-detail">
         ${img}
         ${meta}
+        ${nutrientGrid(plato.nutrientes)}
         ${starsHtml}
         ${alergenos}
         ${receta}
@@ -934,7 +1103,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const isOpen = canExpand && this._platoExpanded.has(key);
     const thumbSrc = plato.imagen;
     const thumbHtml =
-      thumbSrc && !this._brokenImages.has(thumbSrc)
+      this._imgOk(thumbSrc)
         ? `<img class="meal-thumb" data-fallback-icon="mdi:food" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" />`
         : `<ha-icon class="meal-type" icon="mdi:food"></ha-icon>`;
     const kcal = plato.calorias ? `<div class="plato-summary-kcal">${escapeHtml(plato.calorias)} kcal</div>` : "";
@@ -965,7 +1134,7 @@ class NutriplanBridgeCard extends HTMLElement {
       : "Sin especificar";
     const thumbSrc = platos.find((p) => p.imagen)?.imagen;
     const thumbHtml =
-      thumbSrc && !this._brokenImages.has(thumbSrc)
+      this._imgOk(thumbSrc)
         ? `<img class="meal-thumb" data-fallback-icon="${icon}" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" />`
         : `<ha-icon class="meal-type" icon="${icon}"></ha-icon>`;
 
@@ -1026,6 +1195,7 @@ class NutriplanBridgeCard extends HTMLElement {
     const currentPlanId = mealsAttrs.plan_id ?? planAttrs.plan_id;
     const viewingCurrent = this._view.planId === null;
     const day = this._view.day ?? todayIndex ?? 0;
+    this._numDietas = numDietas;
     this._readOnly = !viewingCurrent;
     this._planId = viewingCurrent ? currentPlanId : this._view.planId;
     this._dietaIndex = day;
@@ -1124,6 +1294,37 @@ class NutriplanBridgeCard extends HTMLElement {
       if (cfg.hide_macros !== true) summaryHtml += macroBar(resumen);
     }
 
+    let weekHtml = "";
+    if (this._weekView) {
+      const key = this._viewKey();
+      const week = this._weekCache.get(key);
+      if (week) {
+        const labelOf = (franja) => mealLabels[franja] || MEAL_LABELS[franja] || franja;
+        weekHtml = (week.dias || [])
+          .map((d, i) => {
+            const kcal = d.resumen_nutricional && d.resumen_nutricional.energia_kcal;
+            const lines = (d.comidas || [])
+              .map(
+                (m) =>
+                  `<div class="week-meal"><b>${escapeHtml(labelOf(m.franja))}</b> ${escapeHtml(
+                    (m.platos || []).map((p) => p.nombre || "Sin especificar").join(" + ")
+                  )}</div>`
+              )
+              .join("");
+            const isTodayRow = viewingCurrent && i === todayIndex;
+            return `<div class="week-day${i === day ? " selected" : ""}" data-day="${i}"><div class="week-day-head"><span>${escapeHtml(
+              dayName(i)
+            )}${isTodayRow ? " <small>hoy</small>" : ""}</span><span>${kcal ? Math.round(kcal) + " kcal" : ""}</span></div>${lines}</div>`;
+          })
+          .join("");
+      } else if (this._weekError.has(key)) {
+        weekHtml = `<div class="empty">${escapeHtml(this._weekError.get(key))}</div>`;
+      } else {
+        weekHtml = '<div class="empty">Cargando…</div>';
+        if (!this._weekLoading.has(key)) this._loadWeek(key, this._view.planId);
+      }
+    }
+
     let daysHtml = "";
     if (numDietas > 1) {
       const chips = [];
@@ -1193,7 +1394,8 @@ class NutriplanBridgeCard extends HTMLElement {
             ? `${delta < 0 ? "▼" : "▲"} ${Math.abs(delta)} kg desde la anterior`
             : "";
         if (pesos.length >= 2) {
-          metricsHtml += `<div class="trend">${sparkline(pesos)}<span class="delta">${deltaHtml}</span></div>`;
+          metricsHtml += `<div class="trend" title="Toca para ampliar">${sparkline(pesos)}<span class="delta">${deltaHtml}</span></div>`;
+          if (this._chartOpen) metricsHtml += bigChart(Array.isArray(a.historial) ? a.historial : []);
         } else if (deltaHtml) {
           metricsHtml += `<div class="trend"><span class="delta">${deltaHtml}</span></div>`;
         }
@@ -1203,6 +1405,32 @@ class NutriplanBridgeCard extends HTMLElement {
     }
 
     const unread = chatEntity ? Number(chatEntity.state) || 0 : 0;
+
+    let contactHtml = "";
+    if (cfg.hide_contact !== true) {
+      if (dietistaAttrs.telefono) {
+        contactHtml += `<a class="contact" href="tel:${escapeHtml(dietistaAttrs.telefono)}" title="Llamar al dietista"><ha-icon icon="mdi:phone"></ha-icon></a>`;
+      }
+      if (dietistaAttrs.email) {
+        contactHtml += `<a class="contact" href="mailto:${escapeHtml(dietistaAttrs.email)}" title="Escribir al dietista"><ha-icon icon="mdi:email-outline"></ha-icon></a>`;
+      }
+    }
+
+    let chatHtml = "";
+    if (this._chatOpen && unread > 0) {
+      const raw = chatEntity && chatEntity.attributes && chatEntity.attributes.mensajes;
+      const list = Array.isArray(raw) ? raw : raw && Array.isArray(raw.messages) ? raw.messages : [];
+      const msgs = list
+        .slice(-3)
+        .map((m) => {
+          const text = pick(m, ["message", "text", "content", "body", "mensaje", "texto"]);
+          if (!text) return "";
+          const when = pick(m, ["createdAt", "created_at", "created", "date", "fecha"]);
+          return `<div class="chat-msg">${escapeHtml(text.slice(0, 280))}${when ? `<small>${escapeHtml(formatDate(when))}</small>` : ""}</div>`;
+        })
+        .join("");
+      chatHtml = `<div class="chat-panel">${msgs || `<div class="chat-msg">Tienes ${unread} mensaje(s) sin leer del dietista.</div>`}<button class="action-btn chat-read">Marcar como leído</button></div>`;
+    }
 
     let shopHtml = "";
     if (cfg.hide_shopping !== true) {
@@ -1237,6 +1465,7 @@ class NutriplanBridgeCard extends HTMLElement {
           .join("");
         body = `${scopeBtns}${list || '<div class="empty">Este plan no tiene ingredientes.</div>'}
           ${cfg.todo_entity ? '<button class="action-btn shop-todo">Añadir a la lista de Home Assistant</button>' : ""}
+          <button class="action-btn shop-copy">Copiar lista</button>
           <button class="action-btn shop-close">Cerrar</button>
           ${sh.todoMsg ? `<div class="action-status">${escapeHtml(sh.todoMsg)}</div>` : ""}`;
       } else {
@@ -1257,18 +1486,23 @@ class NutriplanBridgeCard extends HTMLElement {
           <div class="title">${escapeHtml(cfg.title || planName)}</div>
           <div class="subtitle">${escapeHtml(dietistaName)}</div>
         </div>
-        ${unread > 0 ? `<span class="badge" title="Mensajes sin leer del dietista"><ha-icon icon="mdi:chat-processing"></ha-icon>${unread}</span>` : ""}
+        <div class="head-actions">
+          ${contactHtml}
+          ${unread > 0 ? `<button class="badge chat-toggle" title="Mensajes sin leer del dietista"><ha-icon icon="mdi:chat-processing"></ha-icon>${unread}</button>` : ""}
+        </div>
       </div>
+      ${chatHtml}
 
       <div class="section">
         ${planNavHtml}
         <div class="section-head">
-          <div class="section-title">${escapeHtml(sectionTitle)}</div>
-          ${viewingCurrent && !isToday && todayIndex !== undefined ? '<button class="link-btn">Volver a hoy</button>' : ""}
+          <div class="section-title">${escapeHtml(this._weekView ? "Semana completa" : sectionTitle)}</div>
+          <span>
+            ${viewingCurrent && !isToday && todayIndex !== undefined && !this._weekView ? '<button class="link-btn">Volver a hoy</button>' : ""}
+            ${numDietas > 1 ? `<button class="link-btn week-toggle">${this._weekView ? "Vista día" : "Vista semana"}</button>` : ""}
+          </span>
         </div>
-        ${daysHtml}
-        ${summaryHtml}
-        ${mealsHtml}
+        ${this._weekView ? weekHtml : `${daysHtml}${summaryHtml}${mealsHtml}`}
       </div>
 
       ${
@@ -1316,6 +1550,8 @@ const EDITOR_SCHEMA = [
   { name: "hide_shopping", label: "Ocultar lista de la compra", selector: { boolean: {} } },
   { name: "hide_macros", label: "Ocultar reparto de macros", selector: { boolean: {} } },
   { name: "hide_eaten", label: "Ocultar marcar comidas como tomadas", selector: { boolean: {} } },
+  { name: "hide_contact", label: "Ocultar botones de llamar/escribir al dietista", selector: { boolean: {} } },
+  { name: "hide_images", label: "Ocultar fotos de los platos", selector: { boolean: {} } },
   {
     name: "todo_entity",
     label: "Lista de Home Assistant para la compra (opcional)",

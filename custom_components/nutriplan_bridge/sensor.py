@@ -245,6 +245,28 @@ def _meal_detail(slot: str, ingesta: Any) -> dict:
     }
 
 
+def build_device_info(entry: ConfigEntry) -> DeviceInfo:
+    email = entry.data.get(CONF_EMAIL, "Paciente")
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"Nutriplan Bridge ({email})",
+        manufacturer="Nutriplan Bridge",
+        model=email,
+        entry_type="service",
+    )
+
+
+def seguimiento_history(data: Any) -> list[dict]:
+    """Every body measurement, cleaned and sorted oldest -> newest."""
+    items = data.get("seguimientos") if isinstance(data, dict) else None
+    items = [s for s in items if isinstance(s, dict) and s.get("createdTimestamp")] if isinstance(items, list) else []
+    try:
+        items.sort(key=lambda s: float(s["createdTimestamp"]))
+    except (TypeError, ValueError):
+        return []
+    return [_clean_seguimiento(i) for i in items]
+
+
 def shape_meals(dieta: Any) -> list[dict]:
     """All meal slots of one raw "dieta" (one day/schedule), shaped for the card."""
     if not isinstance(dieta, dict):
@@ -378,6 +400,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 DietoProMetricSensor(coordinator, entry, *spec)
                 for spec in METRIC_SENSORS
             ),
+            *(DietoProTodayNutrientSensor(coordinator, entry, *spec) for spec in NUTRIENT_SENSORS),
+            *(DietoProDerivedSensor(coordinator, entry, *spec) for spec in DERIVED_SENSORS),
         ]
     )
 
@@ -1089,15 +1113,8 @@ class DietoProMetricSensor(DietoProEntity):
         self._attr_device_class = device_class
 
     def _latest(self) -> dict:
-        data = (self.coordinator.data or {}).get("seguimientos")
-        items = [s for s in data if isinstance(s, dict) and s.get("createdTimestamp")] if isinstance(data, list) else []
-        if not items:
-            return {}
-        try:
-            items.sort(key=lambda s: float(s["createdTimestamp"]))
-        except (TypeError, ValueError):
-            return {}
-        return _clean_seguimiento(items[-1])
+        history = seguimiento_history(self.coordinator.data)
+        return history[-1] if history else {}
 
     @property
     def native_value(self) -> float | None:
@@ -1107,3 +1124,102 @@ class DietoProMetricSensor(DietoProEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return {"fecha_medicion": self._latest().get("fecha")}
+
+
+# (key, name, field in _sum_nutrients, unit, icon)
+NUTRIENT_SENSORS = (
+    ("proteinas_hoy", "Proteínas de hoy", "proteinas_g", "g", "mdi:food-steak"),
+    ("grasas_hoy", "Grasas de hoy", "grasas_g", "g", "mdi:oil"),
+    ("carbohidratos_hoy", "Hidratos de hoy", "carbohidratos_g", "g", "mdi:bread-slice"),
+    ("fibra_hoy", "Fibra de hoy", "fibra_g", "g", "mdi:grain"),
+)
+
+
+class DietoProTodayNutrientSensor(DietoProTodayEnergySensor):
+    """One of today's planned nutrient totals as its own numeric sensor."""
+
+    def __init__(self, coordinator, entry, key, name, field, unit, icon) -> None:
+        DietoProEntity.__init__(self, coordinator, entry, key, name)
+        self._field = field
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+
+    @property
+    def native_value(self) -> float | None:
+        value = self._totals().get(self._field)
+        return round(value, 1) if value else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {}
+
+
+def _numeric(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _eni(data: dict) -> dict:
+    eni = data.get("eni")
+    return eni if isinstance(eni, dict) else {}
+
+
+def _target_kcal(data: dict) -> float | None:
+    value = _numeric(_eni(data).get("valorEnergetico"))
+    return round(value) if value else None
+
+
+def _target_weight(data: dict) -> float | None:
+    eni = _eni(data)
+    return _numeric(eni.get("pesoSugerido")) or _numeric(eni.get("pesoCorregido"))
+
+
+def _weight_to_target(data: dict) -> float | None:
+    history = seguimiento_history(data)
+    target = _target_weight(data)
+    weight = _numeric(history[-1].get("peso")) if history else None
+    return round(weight - target, 1) if weight is not None and target else None
+
+
+def _weight_change_30d(data: dict) -> float | None:
+    history = [h for h in seguimiento_history(data) if _numeric(h.get("peso")) is not None and h.get("fecha")]
+    if len(history) < 2:
+        return None
+    latest = history[-1]
+    cutoff = latest["fecha"] - timedelta(days=30)
+    older = [h for h in history if h["fecha"] <= cutoff]
+    base = older[-1] if older else history[0]
+    return round(latest["peso"] - base["peso"], 1) if base is not latest else None
+
+
+def _days_since_measurement(data: dict) -> int | None:
+    history = [h for h in seguimiento_history(data) if h.get("fecha")]
+    return (dt_util.now() - history[-1]["fecha"]).days if history else None
+
+
+# (key, name, function(data), unit, icon, device_class, state_class)
+DERIVED_SENSORS = (
+    ("objetivo_calorico", "Objetivo calórico diario", _target_kcal, "kcal", "mdi:target", None, None),
+    ("peso_objetivo", "Peso objetivo", _target_weight, UnitOfMass.KILOGRAMS, "mdi:flag-checkered", SensorDeviceClass.WEIGHT, None),
+    ("peso_restante", "Peso hasta el objetivo", _weight_to_target, UnitOfMass.KILOGRAMS, "mdi:scale-balance", SensorDeviceClass.WEIGHT, SensorStateClass.MEASUREMENT),
+    ("variacion_peso_30d", "Variación de peso (30 días)", _weight_change_30d, UnitOfMass.KILOGRAMS, "mdi:trending-down", SensorDeviceClass.WEIGHT, SensorStateClass.MEASUREMENT),
+    ("dias_sin_medir", "Días desde la última medición", _days_since_measurement, "d", "mdi:calendar-end", None, SensorStateClass.MEASUREMENT),
+)
+
+
+class DietoProDerivedSensor(DietoProEntity):
+    """Values computed from several endpoints (survey targets vs. measurements)."""
+
+    def __init__(self, coordinator, entry, key, name, func, unit, icon, device_class, state_class) -> None:
+        super().__init__(coordinator, entry, key, name)
+        self._func = func
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self._attr_device_class = device_class
+        self._attr_state_class = state_class
+
+    @property
+    def native_value(self):
+        try:
+            return self._func(self.coordinator.data or {})
+        except (TypeError, ValueError, KeyError):
+            return None
