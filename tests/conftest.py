@@ -67,12 +67,30 @@ def data():
             {"id": 4, "title": "Plan semanal 19/10/2026", "created": "2026-10-08T10:00:00", "sentByEmailAt": None},
         ],
         "plan_detail": {
+            "updated": "2026-10-10T11:00:00+00:00",
+            "updatedByPaciente": False,
             "id": 3,
             "title": "Plan semanal 12/10/2026",
             "created": "2026-10-01T10:00:00",
             "dietas": [make_dieta(i) for i in range(7)],
         },
-        "cita": {"cita": {"fecha": (NOW + dtm.timedelta(hours=5)).isoformat()}},
+        "cita": {
+            "cita": {
+                "id": 1382339,
+                "duracion": 15,
+                "fecha": (NOW + dtm.timedelta(hours=5)).isoformat(),
+                "observaciones": "",
+                "confirmedByPaciente": False,
+                "askedByPaciente": False,
+                "confirmedByDietista": True,
+            },
+            "citasConfirmedByPaciente": False,
+            "citaCancelationDeadline": "disabled",
+            "citaBookingEnabled": False,
+            "citaBookingMaxAdvance": 14,
+            "citaBookingDuration": 15,
+            "pendingDietistaConfirmation": False,
+        },
         "seguimientos": [
             {"id": 1, "createdTimestamp": ts(40), "peso": 90, "imc": 30, "pesoGrasa": 30},
             {"id": 2, "createdTimestamp": ts(9), "peso": 88.5, "imc": 29.5, "pesoGrasa": 29},
@@ -83,7 +101,15 @@ def data():
         "chat_messages": [],
         "current_user": {},
         "ratings": [],
-        "charlas": [],
+        "charlas": [
+            {
+                "id": 1,
+                "charla": {"id": 9, "titulo": "Hidratación", "link1": "https://example.com/x", "nombreLink1": "Ver", "observaciones": "n"},
+                "tema": {"id": 2, "titulo": "Hábitos"},
+                "fechaImparticion": "2026-10-01T10:00:00+00:00",
+                "vistoEnApp": False,
+            }
+        ],
     }
 
 

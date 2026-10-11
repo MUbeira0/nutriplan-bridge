@@ -26,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             AppointmentSoonBinary(coordinator, entry),
             NewPlanBinary(coordinator, entry),
             MeasurementDueBinary(coordinator, entry),
+            AppointmentUnconfirmedBinary(coordinator, entry),
         ]
     )
 
@@ -153,3 +154,35 @@ class MeasurementDueBinary(_DietoProBinary):
     @property
     def extra_state_attributes(self) -> dict:
         return {"dias_desde_ultima": self._days(), "umbral_dias": MEASUREMENT_DUE_DAYS}
+
+
+class AppointmentUnconfirmedBinary(_DietoProBinary):
+    """On while the next appointment still needs a confirmation (from you
+    when your account requires it, or from the dietitian for a slot you asked for)."""
+
+    _icon_on = "mdi:calendar-question"
+    _icon_off = "mdi:calendar-check"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "cita_sin_confirmar", "Cita sin confirmar", "mdi:calendar-question")
+
+    def _state(self) -> tuple[bool, bool]:
+        wrapper = self._data.get("cita")
+        wrapper = wrapper if isinstance(wrapper, dict) else {}
+        cita = wrapper.get("cita") if isinstance(wrapper.get("cita"), dict) else None
+        if cita is None:
+            return False, False
+        needs_me = bool(wrapper.get("citasConfirmedByPaciente")) and not cita.get("confirmedByPaciente")
+        needs_dietista = bool(wrapper.get("pendingDietistaConfirmation")) or (
+            bool(cita.get("askedByPaciente")) and not cita.get("confirmedByDietista")
+        )
+        return needs_me, needs_dietista
+
+    @property
+    def is_on(self) -> bool:
+        return any(self._state())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        needs_me, needs_dietista = self._state()
+        return {"falta_tu_confirmacion": needs_me, "falta_confirmacion_dietista": needs_dietista}

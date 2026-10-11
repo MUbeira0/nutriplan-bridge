@@ -463,6 +463,8 @@ class DietoProCurrentPlanSensor(DietoProEntity):
             "plan_id": plan.get("id"),
             "creado": plan.get("created"),
             "enviado_por_email": plan.get("sentByEmailAt"),
+            "actualizado": plan.get("updated"),
+            "modificado_por_paciente": plan.get("updatedByPaciente"),
             "inicio": (plan_start_date(plan).isoformat() if plan and plan_start_date(plan) else None),
             "total_planes": len(plans) if isinstance(plans, list) else 0,
             "planes": plan_summaries(plans),
@@ -577,7 +579,26 @@ class DietoProNextAppointmentSensor(DietoProEntity):
     @property
     def extra_state_attributes(self) -> dict:
         cita = self._cita() or {}
-        return {"cita_id": cita.get("id"), "raw": cita or None}
+        wrapper = (self.coordinator.data or {}).get("cita")
+        wrapper = wrapper if isinstance(wrapper, dict) else {}
+        deadline = wrapper.get("citaCancelationDeadline")
+        return {
+            "cita_id": cita.get("id"),
+            "duracion_min": cita.get("duracion"),
+            "observaciones": cita.get("observaciones") or None,
+            "confirmada_por_dietista": cita.get("confirmedByDietista"),
+            "confirmada_por_paciente": cita.get("confirmedByPaciente"),
+            "pedida_por_paciente": cita.get("askedByPaciente"),
+            # What this account is allowed to do (the buttons in the card follow these):
+            "requiere_confirmacion_paciente": wrapper.get("citasConfirmedByPaciente"),
+            "pendiente_confirmacion_dietista": wrapper.get("pendingDietistaConfirmation"),
+            "reserva_habilitada": wrapper.get("citaBookingEnabled"),
+            "reserva_max_dias": wrapper.get("citaBookingMaxAdvance"),
+            "reserva_duracion_min": wrapper.get("citaBookingDuration"),
+            "cancelacion_habilitada": (deadline not in (None, "disabled")) if "citaCancelationDeadline" in wrapper else None,
+            "cancelacion_limite": deadline,
+            "raw": cita or None,
+        }
 
     _unrecorded_attributes = frozenset({"raw"})
 
@@ -890,6 +911,7 @@ class DietoProEniSensor(DietoProEntity):
             "valor_energetico_min": eni.get("valorEnergeticoMin"),
             "valor_energetico_max": eni.get("valorEnergeticoMax"),
             "valor_energetico_por_dia": eni.get("valorEnergeticoPorDia"),
+            "porcentaje_macros_por_dia": eni.get("porcentajeMacronutrientesPorDia"),
             "objetivo_proteinas_pct": macros.get("proteinas"),
             "objetivo_grasas_pct": macros.get("grasas"),
             "objetivo_carbohidratos_pct": macros.get("glucidos"),
@@ -980,10 +1002,17 @@ class DietoProCharlasSensor(DietoProEntity):
         cleaned = []
         for item in self._items():
             charla = item.get("charla") if isinstance(item.get("charla"), dict) else {}
+            tema = item.get("tema") if isinstance(item.get("tema"), dict) else {}
             cleaned.append(
                 {
+                    "id": item.get("id"),
                     "titulo": charla.get("titulo") or item.get("titulo"),
+                    "tema": tema.get("titulo"),
                     "fecha": _parse_datetime(item.get("fechaImparticion")),
+                    "enlace": charla.get("link1") or None,
+                    "enlace_nombre": charla.get("nombreLink1") or None,
+                    "observaciones": charla.get("observaciones") or None,
+                    "visto": item.get("vistoEnApp"),
                 }
             )
         return cleaned
@@ -994,7 +1023,12 @@ class DietoProCharlasSensor(DietoProEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"charlas": self._cleaned(), "raw": self._charlas()}
+        cleaned = self._cleaned()
+        return {
+            "charlas": cleaned,
+            "sin_ver": sum(1 for c in cleaned if c.get("visto") is False),
+            "raw": self._charlas(),
+        }
 
 
 class DietoProTodayEnergySensor(DietoProTodayMealsSensor):

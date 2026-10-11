@@ -119,10 +119,17 @@ class DietoProAppointmentCalendar(_DietoProCalendar):
         if when is None:
             return None
         local = dt_util.as_local(when)
+        minutes = cita.get("duracion")
+        duration = timedelta(minutes=minutes) if isinstance(minutes, (int, float)) and minutes > 0 else APPOINTMENT_DURATION
         if local.hour == 0 and local.minute == 0:
             # Date only, no time of day: an all-day event.
             return CalendarEvent(start=local.date(), end=local.date() + timedelta(days=1), summary="Cita con el dietista")
-        return CalendarEvent(start=local, end=local + APPOINTMENT_DURATION, summary="Cita con el dietista")
+        return CalendarEvent(
+            start=local,
+            end=local + duration,
+            summary="Cita con el dietista",
+            description=cita.get("observaciones") or None,
+        )
 
     @property
     def event(self) -> CalendarEvent | None:

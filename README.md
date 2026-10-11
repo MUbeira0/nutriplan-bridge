@@ -159,6 +159,25 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.28 (ajustadas con datos de una cuenta real)
+
+Un diagnóstico descargado de una cuenta real confirmó la forma de varios
+datos que antes eran suposiciones: la cita (`fecha`, `duracion`, confirmaciones
+y permisos de la cuenta), las charlas y los objetivos por día de la encuesta
+inicial. Con eso:
+
+- **La tarjeta solo ofrece lo que tu cuenta permite:** "Pedir cita" solo si la
+  reserva está habilitada, "Cancelar" solo si la cancelación no está
+  deshabilitada y "Confirmar" solo si tu cuenta exige confirmar. Ya no salen
+  botones que darían error.
+- **Cita:** duración real (15 min en el calendario) y estado ("confirmada por
+  tu dietista", "falta tu confirmación"...). Nuevo binary sensor *Cita sin
+  confirmar*.
+- **Charlas** en la tarjeta (tema, fecha, enlace, punto de "sin ver") y el
+  atributo `sin_ver` en el sensor.
+- **Objetivos de la encuesta inicial** junto a las calorías y macros del día.
+- El plan vigente se elige correctamente (comprobado con el diagnóstico real).
+
 ## Novedades 0.27
 
 - **Imagen de marca:** icono y logo (claro/oscuro) en `brand/`.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.0
+- Ajustes con datos de una cuenta real: duración real de la cita, confirmaciones y permisos de la cuenta (reserva, cancelación, confirmación) que gobiernan los botones de la tarjeta.
+- Binary sensor *Cita sin confirmar*; charlas en la tarjeta; objetivo calórico y de macros por día junto al resumen del día.
+- `codeowners` apunta a `@MUbeira0`. 71 tests.
+
 ## 0.27.0
 - Marca: icono y logo claro/oscuro. Iconos para todas las acciones y entidades con icono según estado.
 - Tarjeta: accesibilidad (teclado, aria), `getGridOptions` y vista previa, alérgenos como etiquetas, kcal por comida, valoración por plato, estados vacíos y de carga, modo compacto, color de acento.

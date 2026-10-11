@@ -71,6 +71,8 @@ const ENTITY_FIELDS = [
   { key: "tracking_entity", suffix: "_seguimientos", label: "Seguimientos" },
   { key: "dietista_entity", suffix: "_dietista", label: "Dietista" },
   { key: "chat_entity", suffix: "_mensajes_sin_leer", label: "Mensajes sin leer" },
+  { key: "charlas_entity", suffix: "_charlas", label: "Charlas" },
+  { key: "eni_entity", suffix: "_estado_eni", label: "Encuesta inicial (objetivos)" },
 ];
 
 function formatShortDate(iso) {
@@ -333,6 +335,8 @@ class NutriplanBridgeCard extends HTMLElement {
       findEntity(hass, cfg.tracking_entity, "_seguimientos"),
       findEntity(hass, cfg.dietista_entity, "_dietista"),
       findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer"),
+      findEntity(hass, cfg.charlas_entity, "_charlas"),
+      findEntity(hass, cfg.eni_entity, "_estado_eni"),
     ];
     const changed = !this._lastEntities || entities.some((e, i) => e !== this._lastEntities[i]);
     this._lastEntities = entities;
@@ -596,6 +600,15 @@ class NutriplanBridgeCard extends HTMLElement {
         }
         .book-note { width: 100%; margin: 6px 0; }
         .appt-actions { margin-top: 8px; }
+        .appt-meta { font-size: 0.78em; color: var(--secondary-text-color); margin: 2px 0 0 32px; }
+        .charla { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 0.88em; }
+        .charla + .charla { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
+        .charla-text { flex: 1; min-width: 0; }
+        .charla-title { color: var(--primary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .charla-sub { font-size: 0.8em; color: var(--secondary-text-color); }
+        .charla .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary-color); flex-shrink: 0; }
+        a.charla-link { color: var(--primary-color); display: inline-flex; padding: 4px; text-decoration: none; }
+        a.charla-link ha-icon { --mdc-icon-size: 20px; }
         .slot-day { font-size: 0.78em; color: var(--secondary-text-color); margin: 8px 0 4px 0; text-transform: capitalize; }
         .slot-btn {
           font: inherit; font-size: 0.82em; border: 1px solid var(--divider-color, rgba(127,127,127,.4));
@@ -850,6 +863,16 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
+  async _confirmCita(citaId) {
+    try {
+      await this._callService("confirmar_cita", this._withAccount(citaId ? { cita_id: citaId } : {}), true);
+      this._book = { status: "done", slots: [], selected: null, note: "", msg: "Cita confirmada." };
+    } catch (err) {
+      this._book = { status: "error", slots: [], selected: null, note: "", msg: err.message || String(err) };
+    }
+    this._safeRender();
+  }
+
   async _cancelCita(citaId) {
     if (!window.confirm("¿Cancelar tu próxima cita? No se puede deshacer desde aquí.")) return;
     try {
@@ -976,6 +999,11 @@ class NutriplanBridgeCard extends HTMLElement {
     }
     if (ev.target.closest(".book-send")) {
       this._sendBooking();
+      return;
+    }
+    const confirmCita = ev.target.closest(".cita-confirm");
+    if (confirmCita) {
+      this._confirmCita(confirmCita.dataset.citaId);
       return;
     }
     const cancelCita = ev.target.closest(".cita-cancel");
@@ -1445,9 +1473,14 @@ class NutriplanBridgeCard extends HTMLElement {
       mealsHtml = emptyState("mdi:food-off-outline", `Sin comidas programadas ${isToday ? "para hoy" : "este día"}`);
     }
 
+    const eniEntity = findEntity(hass, cfg.eni_entity, "_estado_eni");
+    const eniAttrs = (eniEntity && eniEntity.attributes) || {};
+    const targetKcal = Array.isArray(eniAttrs.valor_energetico_por_dia) ? Number(eniAttrs.valor_energetico_por_dia[day]) || null : null;
+    const targetMacros = Array.isArray(eniAttrs.porcentaje_macros_por_dia) ? eniAttrs.porcentaje_macros_por_dia[day] : null;
     let summaryHtml = "";
     if (resumen && resumen.energia_kcal) {
       const parts = [`<span><b>${escapeHtml(Math.round(resumen.energia_kcal))}</b> kcal</span>`];
+      if (targetKcal) parts.push(`<span>objetivo <b>${escapeHtml(Math.round(targetKcal))}</b></span>`);
       [["proteinas_g", "Prot"], ["grasas_g", "Grasa"], ["carbohidratos_g", "Hidr"]].forEach(([k, l]) => {
         if (resumen[k] !== undefined && resumen[k] !== null) {
           parts.push(`<span>${l} <b>${escapeHtml(Math.round(resumen[k]))}</b> g</span>`);
@@ -1458,7 +1491,13 @@ class NutriplanBridgeCard extends HTMLElement {
         parts.push(`<span>Media semana <b>${escapeHtml(week.promedio_kcal)}</b> kcal</span>`);
       }
       summaryHtml = `<div class="day-summary">${parts.join("")}</div>`;
-      if (cfg.hide_macros !== true) summaryHtml += macroBar(resumen);
+      if (cfg.hide_macros !== true) {
+        summaryHtml += macroBar(resumen);
+        if (targetMacros && typeof targetMacros === "object") {
+          const t = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : "?");
+          summaryHtml += `<div class="macro-legend">Objetivo: proteínas ${t(targetMacros.proteinas)}% · hidratos ${t(targetMacros.glucidos)}% · grasas ${t(targetMacros.grasas)}%</div>`;
+        }
+      }
     }
 
     let weekHtml = "";
@@ -1520,6 +1559,7 @@ class NutriplanBridgeCard extends HTMLElement {
       `;
     }
 
+    const apptAttrs = (apptEntity && apptEntity.attributes) || {};
     let apptHtml = emptyState("mdi:calendar-blank-outline", "Sin próxima cita");
     if (apptEntity && apptEntity.state && !["unknown", "unavailable"].includes(apptEntity.state)) {
       const label =
@@ -1528,12 +1568,25 @@ class NutriplanBridgeCard extends HTMLElement {
       apptHtml = `<div class="appointment"><ha-icon icon="mdi:calendar-clock"></ha-icon><span>${escapeHtml(
         label
       )}${rel ? ` <small>(${escapeHtml(rel)})</small>` : ""}</span></div>`;
+      const bits = [];
+      if (apptAttrs.duracion_min) bits.push(`${apptAttrs.duracion_min} min`);
+      if (apptAttrs.confirmada_por_dietista === true) bits.push("confirmada por tu dietista");
+      else if (apptAttrs.pendiente_confirmacion_dietista === true || apptAttrs.pedida_por_paciente === true) bits.push("pendiente de que la confirme tu dietista");
+      if (apptAttrs.requiere_confirmacion_paciente === true && apptAttrs.confirmada_por_paciente === false) bits.push("falta tu confirmación");
+      if (apptAttrs.observaciones) bits.push(String(apptAttrs.observaciones));
+      if (bits.length) apptHtml += `<div class="appt-meta">${escapeHtml(bits.join(" · "))}</div>`;
     }
 
     let apptActionsHtml = "";
-    if (cfg.hide_booking !== true) {
+    // The real response says what the account allows: booking can be switched
+    // off, cancellation can be "disabled", confirmation may not be required.
+    // Only offer actions that can actually work (unknown = still offered).
+    const canBook = apptAttrs.reserva_habilitada !== false;
+    const canCancel = apptAttrs.cancelacion_habilitada !== false;
+    const needsConfirm = apptAttrs.requiere_confirmacion_paciente === true && apptAttrs.confirmada_por_paciente === false;
+    if (cfg.hide_booking !== true && (canBook || canCancel || needsConfirm)) {
       const bk = this._book;
-      const citaId = apptEntity && apptEntity.attributes ? apptEntity.attributes.cita_id : null;
+      const citaId = apptAttrs.cita_id ?? null;
       let panel = "";
       if (bk.status === "loading") {
         panel = '<div class="action-status">Buscando huecos libres…</div>';
@@ -1570,9 +1623,9 @@ class NutriplanBridgeCard extends HTMLElement {
           <button class="action-btn book-close">Cerrar</button>
           ${bk.msg ? `<div class="action-status error">${escapeHtml(bk.msg)}</div>` : ""}`;
       } else {
-        panel = `<button class="action-btn book-open">Pedir cita</button>${
-          citaId ? `<button class="action-btn cita-cancel" data-cita-id="${escapeHtml(citaId)}">Cancelar cita</button>` : ""
-        }${bk.msg ? `<div class="action-status${bk.status === "error" ? " error" : ""}">${escapeHtml(bk.msg)}</div>` : ""}`;
+        panel = `${canBook ? '<button class="action-btn book-open">Pedir cita</button>' : ""}${
+          citaId && needsConfirm ? `<button class="action-btn cita-confirm" data-cita-id="${escapeHtml(citaId)}">Confirmar cita</button>` : ""
+        }${citaId && canCancel ? `<button class="action-btn cita-cancel" data-cita-id="${escapeHtml(citaId)}">Cancelar cita</button>` : ""}${bk.msg ? `<div class="action-status${bk.status === "error" ? " error" : ""}">${escapeHtml(bk.msg)}</div>` : ""}`;
       }
       apptActionsHtml = `<div class="appt-actions">${panel}</div>`;
     }
@@ -1654,6 +1707,27 @@ class NutriplanBridgeCard extends HTMLElement {
       chatHtml = `<div class="chat-panel">${
         msgs || (unread > 0 ? `<div class="chat-msg">Tienes ${unread} mensaje(s) sin leer del dietista.</div>` : '<div class="chat-msg">Sin mensajes recientes.</div>')
       }${unread > 0 ? '<button class="action-btn chat-read">Marcar como leído</button>' : ""}${compose}</div>`;
+    }
+
+    let charlasHtml = "";
+    const charlasEntity = findEntity(hass, cfg.charlas_entity, "_charlas");
+    const charlas = (charlasEntity && charlasEntity.attributes && charlasEntity.attributes.charlas) || [];
+    if (cfg.hide_charlas !== true && Array.isArray(charlas) && charlas.length) {
+      const recent = [...charlas]
+        .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")))
+        .slice(0, 3);
+      charlasHtml = `<div class="section"><div class="section-title"><ha-icon icon="mdi:school-outline"></ha-icon>Charlas</div>${recent
+        .map(
+          (c) =>
+            `<div class="charla">${c.visto === false ? '<span class="dot" title="Sin ver"></span>' : ""}<div class="charla-text"><div class="charla-title">${escapeHtml(
+              c.titulo || c.tema || "Charla"
+            )}</div><div class="charla-sub">${escapeHtml([c.tema && c.titulo ? c.tema : "", c.fecha ? formatShortDate(c.fecha) : ""].filter(Boolean).join(" · "))}</div></div>${
+              c.enlace
+                ? `<a class="charla-link" href="${escapeHtml(c.enlace)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(c.enlace_nombre || "Abrir enlace")}"><ha-icon icon="mdi:open-in-new"></ha-icon></a>`
+                : ""
+            }</div>`
+        )
+        .join("")}</div>`;
     }
 
     let shopHtml = "";
@@ -1747,6 +1821,8 @@ class NutriplanBridgeCard extends HTMLElement {
 
       ${shopHtml}
 
+      ${charlasHtml}
+
       ${
         trackingEntity && cfg.hide_tracking !== true
           ? `<div class="section">
@@ -1786,7 +1862,8 @@ const EDITOR_SCHEMA = [
   { name: "hide_contact", label: "Ocultar botones de llamar/escribir al dietista", selector: { boolean: {} } },
   { name: "hide_chat", label: "Ocultar el icono de mensajes (si no hay mensajes sin leer)", selector: { boolean: {} } },
   { name: "hide_chat_compose", label: "Ocultar la caja para escribir al dietista", selector: { boolean: {} } },
-  { name: "hide_booking", label: "Ocultar pedir/cancelar cita", selector: { boolean: {} } },
+  { name: "hide_booking", label: "Ocultar pedir/confirmar/cancelar cita", selector: { boolean: {} } },
+  { name: "hide_charlas", label: "Ocultar charlas", selector: { boolean: {} } },
   { name: "hide_images", label: "Ocultar fotos de los platos", selector: { boolean: {} } },
   {
     name: "todo_entity",
