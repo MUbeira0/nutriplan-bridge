@@ -332,3 +332,103 @@ cancelar_cita:
       required: false
       selector:
         text:
+
+opciones_alimento:
+  name: Ver alimentos equivalentes
+  description: >-
+    Solo lectura. Para un alimento suelto del plan (p. ej. una pechuga de
+    pollo), lista los alimentos equivalentes con la cantidad que le
+    corresponde a cada uno. Usa "alimento_id" y "cantidad" del atributo
+    "comidas" del sensor Comidas de hoy.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    alimento_id:
+      name: ID del alimento
+      description: El "alimento_id" del alimento a sustituir.
+      required: true
+      selector:
+        text:
+    cantidad:
+      name: Cantidad
+      description: La "cantidad" actual del alimento (gramos).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5000
+          mode: box
+
+cambiar_alimento:
+  name: Cambiar alimento
+  description: >-
+    Sustituye un alimento suelto del plan activo por otro equivalente.
+    IMPORTANTE: modifica tu plan real en DietoPro.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    plan_id:
+      name: ID del plan
+      description: El "plan_id" del sensor Comidas de hoy.
+      required: true
+      selector:
+        text:
+    dieta:
+      name: Índice de la dieta
+      description: El "dieta_index" del sensor Comidas de hoy.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 10
+          mode: box
+    franja:
+      name: Franja
+      description: La franja (p. ej. "tentempie1").
+      required: true
+      selector:
+        text:
+    alimento_actual_id:
+      name: ID del alimento actual
+      description: El "alimento_id" del alimento a sustituir.
+      required: true
+      selector:
+        text:
+    cantidad_actual:
+      name: Cantidad actual
+      description: La "cantidad" actual de ese alimento.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5000
+          mode: box
+    nuevo_alimento_id:
+      name: ID del nuevo alimento
+      description: El "alimento_id" elegido en "opciones_alimento".
+      required: true
+      selector:
+        text:
+    nueva_cantidad:
+      name: Cantidad nueva
+      description: La "cantidad" que indica "opciones_alimento" para el nuevo alimento.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 5000
+          mode: box

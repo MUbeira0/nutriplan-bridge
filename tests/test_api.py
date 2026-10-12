@@ -153,3 +153,23 @@ def test_confirm_and_cancel_paths():
         ("POST", "https://dietopro.com/api/paciente/citas/7/confirm"),
         ("POST", "https://dietopro.com/api/paciente/citas/7/cancel"),
     ]
+
+
+def test_alimento_options_query():
+    c, session = client([LOGIN_OK, FakeResp(200, [])])
+    run(c.async_get_alimento_options(4321, 130))
+    assert session.calls[-1] == ("GET", "https://dietopro.com/api/paciente/alimentos?change=4321&quantity=130")
+
+
+def test_change_alimento_patch_body():
+    c, session = client([LOGIN_OK, FakeResp(200, {})])
+    run(c.async_change_alimento(77, 1, "tentempie1", 4321, 130, 99, 120.5))
+    assert session.calls[-1] == ("PATCH", "https://dietopro.com/api/paciente/changes/77/alimento")
+    assert session.last_kwargs["json"] == {
+        "currentId": 4321,
+        "currentQuantity": 130,
+        "alimentoId": 99,
+        "alimentoQuantity": 120.5,
+        "ingesta": "tentempie1",
+        "dieta": 1,
+    }

@@ -599,6 +599,8 @@ class NutriplanBridgeCard extends HTMLElement {
           border: 1px solid var(--divider-color, rgba(127,127,127,.4)); border-radius: 8px; padding: 6px 8px;
         }
         .book-note { width: 100%; margin: 6px 0; }
+        .alimento-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+        .alimento-row + .alimento-row { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
         .appt-actions { margin-top: 8px; }
         .appt-meta { font-size: 0.78em; color: var(--secondary-text-color); margin: 2px 0 0 32px; }
         .charla { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 0.88em; }
@@ -945,6 +947,50 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
+  async _startCambiarAlimento(subingestaId, alimentoId, cantidad, franja) {
+    const base = { kind: "alimento", franja, alimentoId, cantidad };
+    this._changeState.set(subingestaId, { ...base, status: "loading" });
+    this._safeRender();
+    try {
+      const res = await this._callService(
+        "opciones_alimento",
+        this._withAccount({ alimento_id: alimentoId, cantidad: Number(cantidad) }),
+        true
+      );
+      this._changeState.set(subingestaId, { ...base, status: "options", options: (res && res.opciones) || [] });
+    } catch (err) {
+      this._changeState.set(subingestaId, { ...base, status: "error", error: err.message || String(err) });
+    }
+    this._safeRender();
+  }
+
+  async _applyCambiarAlimento(subingestaId, nuevoId, nuevaCantidad, nombre) {
+    const prev = this._changeState.get(subingestaId) || {};
+    if (!window.confirm(`¿Cambiar por ${nombre || "este alimento"} (${nuevaCantidad} g)? Se modificará tu plan real.`)) return;
+    this._changeState.set(subingestaId, { ...prev, status: "applying" });
+    this._safeRender();
+    try {
+      await this._callService(
+        "cambiar_alimento",
+        this._withAccount({
+          plan_id: this._planId,
+          dieta: this._dietaIndex,
+          franja: prev.franja,
+          alimento_actual_id: Number(prev.alimentoId),
+          cantidad_actual: Number(prev.cantidad),
+          nuevo_alimento_id: Number(nuevoId),
+          nueva_cantidad: Number(nuevaCantidad),
+        }),
+        true
+      );
+      this._changeState.delete(subingestaId);
+      this._weekCache.delete("current");
+    } catch (err) {
+      this._changeState.set(subingestaId, { ...prev, status: "error", error: err.message || String(err) });
+    }
+    this._safeRender();
+  }
+
   async _applyCambiarPlato(subingestaId, nuevoPlatoId) {
     const prev = this._changeState.get(subingestaId) || {};
     this._changeState.set(subingestaId, { status: "applying" });
@@ -1113,7 +1159,26 @@ class NutriplanBridgeCard extends HTMLElement {
       this._applyCambiarPlato(acceptBtn.dataset.subingesta, acceptBtn.dataset.nuevoId);
       return;
     }
+    const alimentoPick = ev.target.closest(".alimento-pick");
+    if (alimentoPick) {
+      this._applyCambiarAlimento(
+        alimentoPick.dataset.subingesta,
+        alimentoPick.dataset.nuevoId,
+        alimentoPick.dataset.nuevaCantidad,
+        alimentoPick.dataset.nombre
+      );
+      return;
+    }
     const cambiarBtn = ev.target.closest(".cambiar-btn");
+    if (cambiarBtn && cambiarBtn.dataset.kind === "alimento") {
+      this._startCambiarAlimento(
+        cambiarBtn.dataset.subingesta,
+        cambiarBtn.dataset.alimentoId,
+        cambiarBtn.dataset.cantidad,
+        cambiarBtn.dataset.franja
+      );
+      return;
+    }
     if (cambiarBtn) {
       this._startCambiarPlato(cambiarBtn.dataset.subingesta, cambiarBtn.dataset.platoId, cambiarBtn.dataset.franja);
       return;
@@ -1194,14 +1259,46 @@ class NutriplanBridgeCard extends HTMLElement {
     `;
   }
 
+  _renderAlimentoActions(plato, franja, stateKey, state) {
+    const sk = escapeHtml(stateKey);
+    const attrs = `data-kind="alimento" data-subingesta="${sk}" data-alimento-id="${escapeHtml(plato.alimento_id)}" data-cantidad="${escapeHtml(
+      plato.cantidad ?? ""
+    )}" data-franja="${escapeHtml(franja)}"`;
+    if (state.status === "loading") return '<div class="action-status">Buscando equivalentes…</div>';
+    if (state.status === "applying") return '<div class="action-status">Aplicando cambio…</div>';
+    if (state.status === "options") {
+      const opts = state.options || [];
+      if (!opts.length) {
+        return `<div class="action-status">Sin alimentos equivalentes.</div><button class="action-btn cancelar-btn" data-subingesta="${sk}">Cerrar</button>`;
+      }
+      const rows = opts
+        .map(
+          (o) =>
+            `<div class="alimento-row"><div class="plato-summary-text"><div class="plato-summary-nombre">${escapeHtml(
+              o.nombre || "Sin nombre"
+            )}</div><div class="plato-summary-kcal">${escapeHtml(o.cantidad)} g${o.medida_casera ? ` (${escapeHtml(o.medida_casera)})` : ""}</div></div><button class="action-btn alimento-pick" data-subingesta="${sk}" data-nuevo-id="${escapeHtml(
+              o.alimento_id
+            )}" data-nueva-cantidad="${escapeHtml(o.cantidad)}" data-nombre="${escapeHtml(o.nombre || "")}">Elegir</button></div>`
+        )
+        .join("");
+      return `<div class="opciones-header">Equivalentes (${opts.length})</div><div class="opciones-plato">${rows}</div><button class="action-btn cancelar-btn" data-subingesta="${sk}">Cancelar</button>`;
+    }
+    if (state.status === "error") {
+      return `<div class="action-status error">${escapeHtml(state.error)}</div><button class="cambiar-btn" ${attrs}><ha-icon icon="mdi:refresh"></ha-icon>Reintentar</button>`;
+    }
+    return `<button class="cambiar-btn" ${attrs}><ha-icon icon="mdi:swap-horizontal"></ha-icon>Cambiar alimento</button>`;
+  }
+
   _renderPlatoActions(plato, franja) {
     if (this._readOnly) return "";
     if (plato.subingesta_id === undefined || plato.subingesta_id === null) return "";
-    if (plato.plato_id === undefined || plato.plato_id === null) {
-      return `<div class="action-status">${plato.tipo === "suplemento" ? "Suplemento" : "Alimento suelto"}: se cambia desde la app oficial.</div>`;
+    const isAlimento = plato.tipo === "alimento" && plato.alimento_id !== undefined && plato.alimento_id !== null;
+    if (!isAlimento && (plato.plato_id === undefined || plato.plato_id === null)) {
+      return `<div class="action-status">${plato.tipo === "suplemento" ? "Suplemento" : "Alimento"}: se cambia desde la app oficial.</div>`;
     }
     const stateKey = String(plato.subingesta_id);
     const state = this._changeState.get(stateKey) || { status: "idle" };
+    if (isAlimento) return this._renderAlimentoActions(plato, franja, stateKey, state);
     const dataAttrs = `data-subingesta="${escapeHtml(stateKey)}" data-plato-id="${escapeHtml(
       plato.plato_id
     )}" data-franja="${escapeHtml(franja)}"`;
@@ -1233,6 +1330,7 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _renderPlatoDetail(plato, franja) {
+    const isLoose = !!plato.tipo && plato.tipo !== "plato";
     const img =
       this._imgOk(plato.imagen)
         ? `<img class="plato-img" src="${escapeHtml(plato.imagen)}" alt="${escapeHtml(plato.nombre || "")}" loading="lazy" />`
@@ -1276,12 +1374,12 @@ class NutriplanBridgeCard extends HTMLElement {
 
     return `
       <div class="plato-detail">
-        ${img}
+        ${isLoose ? "" : img}
         ${meta}
         ${nutrientGrid(plato.nutrientes)}
         ${starsHtml}
         ${alergenos}
-        ${receta}
+        ${isLoose ? "" : receta}
         ${ingredientes}
         <div class="plato-actions">${this._renderPlatoActions(plato, franja)}</div>
       </div>

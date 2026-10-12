@@ -32,6 +32,12 @@
     },
     "cancelar_cita": {
       "service": "mdi:calendar-remove"
+    },
+    "opciones_alimento": {
+      "service": "mdi:food-variant"
+    },
+    "cambiar_alimento": {
+      "service": "mdi:swap-horizontal-variant"
     }
   }
 }

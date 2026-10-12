@@ -91,3 +91,9 @@ def test_diagnostics_reports_loose_items_without_values():
     out = _loose_items([dieta])
     assert out[0]["item_keys"] == ["alimento", "cantidad"] and out[0]["inner_keys"] == ["id", "nombre"]
     assert _unnamed_platos([dieta]) == []  # now named, so no longer "unnamed"
+
+
+def test_loose_food_exposes_ids_needed_to_swap_it():
+    sub = {"id": "9", "alimentoCantidad": {"cantidad": 130, "alimento": {"id": 4321, "nombre": "Pollo"}}}
+    d = sensor._plato_detail(sub)
+    assert d["alimento_id"] == 4321 and d["cantidad"] == 130

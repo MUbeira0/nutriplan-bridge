@@ -103,3 +103,57 @@ def test_confirm_with_explicit_id(data):
     h, _ = hass_with(data, client)
     run(integration._async_handle_confirm_cita(h, Call({"cita_id": 9})))
     client.async_confirm_cita.assert_awaited_once_with(9)
+
+
+def test_normalize_alimento_options_uses_midpoint_of_first_measure():
+    import custom_components.nutriplan_bridge as integ
+
+    raw = [
+        {"id": 5, "nombre": "Pavo", "medidasCaseras": [{"cantidadMaxima": 140, "cantidadMinima": 120, "medida": "1 filete"}],
+         "grupoAlimento": {"nombre": "Carnes", "superGrupoAlimento": {"nombre": "Proteicos"}}},
+        {"id": "x", "nombre": "sin id"},
+        {"id": 6, "nombre": "Sin medidas"},
+    ]
+    out = integ.normalize_alimento_options(raw, 130.0)
+    assert out[0] == {"alimento_id": 5, "nombre": "Pavo", "cantidad": 130, "medida_casera": "1 filete", "grupo": "Carnes", "categoria": "Proteicos"}
+    assert out[1]["alimento_id"] == 6 and out[1]["cantidad"] == 130  # falls back to the requested quantity
+    assert len(out) == 2
+
+
+def test_alimento_options_service(data):
+    client = MagicMock(async_get_alimento_options=AsyncMock(return_value=[{"id": 5, "nombre": "Pavo"}]))
+    h, _ = hass_with(data, client)
+    res = run(integration._async_handle_alimento_options(h, Call({"alimento_id": 4321, "cantidad": 130.0})))
+    client.async_get_alimento_options.assert_awaited_once_with(4321, 130.0)
+    assert res["opciones"][0]["alimento_id"] == 5
+
+
+def test_change_alimento_service_validates_and_calls(data):
+    client = MagicMock(async_change_alimento=AsyncMock(return_value={}))
+    h, c = hass_with(data, client)
+    run(
+        integration._async_handle_change_alimento(
+            h,
+            Call({"plan_id": "77", "dieta": 1, "franja": "tentempie1", "alimento_actual_id": "4321", "cantidad_actual": 130.0,
+                  "nuevo_alimento_id": 5, "nueva_cantidad": "120.5"}),
+        )
+    )
+    client.async_change_alimento.assert_awaited_once_with(77, 1, "tentempie1", 4321, 130, 5, 120.5)
+    c.async_request_refresh.assert_awaited_once()
+
+
+def test_change_alimento_rejects_bad_numbers(data):
+    h, _ = hass_with(data, MagicMock())
+    bad = Call({"plan_id": 1, "dieta": 0, "franja": "x", "alimento_actual_id": 1, "cantidad_actual": "mucho", "nuevo_alimento_id": 2, "nueva_cantidad": 3})
+    with pytest.raises(HomeAssistantError):
+        run(integration._async_handle_change_alimento(h, bad))
+
+
+def test_plato_options_rejects_empty_id_instead_of_calling_the_api(data):
+    # a stale card used to send "" for a loose food -> DietoPro answered HTTP 500
+    client = MagicMock(async_get_plato_options=AsyncMock())
+    h, _ = hass_with(data, client)
+    with pytest.raises(HomeAssistantError) as exc:
+        run(integration._async_handle_plato_options(h, Call({"plato_id": "", "franja": "tentempie1"})))
+    assert "alimento suelto" in str(exc.value)
+    client.async_get_plato_options.assert_not_called()

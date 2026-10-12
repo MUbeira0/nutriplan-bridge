@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.29.0
+- Cambiar alimentos sueltos: acciones `opciones_alimento` y `cambiar_alimento` y botón «Cambiar alimento» en la tarjeta (contratos de la app oficial v51).
+- Alimentos sueltos sin hueco de imagen ni «No requiere preparación». `opciones_plato` rechaza IDs vacíos con un mensaje claro.
+- La tarjeta se sirve desde una ruta con la versión para evitar copias antiguas en caché. 90 tests.
+
 ## 0.28.2
 - Causa real de los «Sin especificar»: una subingesta puede ser un `plato`, un alimento suelto (`alimentoCantidad`) o un suplemento (`suplementoCantidad`), y solo se conocía el primero. Ahora los tres se leen (estructura sacada de la app oficial y confirmada con un diagnóstico real).
 - Los alimentos sueltos aparecen con su nombre y cantidad («Pechuga de pollo (150 g)»), cuentan en la lista de la compra y no ofrecen «Cambiar plato» (la app los cambia por otro endpoint).

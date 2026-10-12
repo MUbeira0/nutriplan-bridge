@@ -159,6 +159,23 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.29
+
+- **Alimentos sueltos** (p. ej. "Pollo, pechuga, solomillo (130 g)"): ahora se
+  pueden cambiar por un equivalente desde la tarjeta ("Cambiar alimento") o con
+  las acciones `opciones_alimento` (solo lectura) y `cambiar_alimento`
+  (**modifica tu plan real**). Contratos sacados de la app oficial v51:
+  `GET alimentos?change=&quantity=` y `PATCH changes/{plan}/alimento`.
+  Sin probar contra una cuenta real: la primera vez, comprueba el resultado en
+  la app oficial.
+- Los alimentos sueltos ya no muestran el hueco grande de imagen ni "No
+  requiere preparación".
+- `opciones_plato` con un ID vacío devuelve un mensaje claro en lugar de un
+  error 500 de DietoPro.
+- **La tarjeta se sirve desde una URL con la versión** (`/nutriplan_bridge_files/v0.29.0/...`),
+  así el navegador o la app de Home Assistant nunca reutilizan una copia
+  antigua en caché tras actualizar.
+
 ## Novedades 0.28 (ajustadas con datos de una cuenta real)
 
 Un diagnóstico descargado de una cuenta real confirmó la forma de varios

@@ -32,6 +32,12 @@ Confirmed from the decompiled RTK Query API slice (+ live route/verb checks):
   request/response body assumed to follow gesdinet/jwt-refresh-token-bundle
   defaults since no authenticated session was available to confirm it. If it
   ever stops working the client transparently falls back to a full re-login.
+- GET  /api/paciente/alimentos?change={alimentoId}&quantity={q} -> equivalent
+  foods for a loose food; each item has "medidasCaseras" (the app takes the
+  first one and uses the midpoint of cantidadMinima/cantidadMaxima as the quantity)
+- PATCH /api/paciente/changes/{planId}/alimento  body {"currentId",
+  "currentQuantity", "alimentoId", "alimentoQuantity", "ingesta", "dieta"}
+  (swaps a loose food; traced from the app's own call site)
 - GET  /api/paciente/chat/messages?limit=N[&beforeId=] -> {"messages": [...],
   "has_more": bool}; each message carries "created" and its text
 - POST /api/paciente/chat/messages  body {"text": "..."} -> send a chat message
@@ -313,3 +319,31 @@ class DietoProApiClient:
 
     async def async_cancel_cita(self, cita_id: Any) -> Any:
         return await self._async_request("POST", f"/api/paciente/citas/{cita_id}/cancel")
+
+    async def async_get_alimento_options(self, alimento_id: Any, quantity: Any) -> Any:
+        """Equivalent foods that can replace a loose food (alimentoCantidad)."""
+        return await self._async_request("GET", f"/api/paciente/alimentos?change={alimento_id}&quantity={quantity}")
+
+    async def async_change_alimento(
+        self,
+        plan_id: int,
+        dieta: int,
+        franja: str,
+        current_id: int,
+        current_quantity: Any,
+        new_id: int,
+        new_quantity: Any,
+    ) -> Any:
+        """Swap a loose food in the live plan for an equivalent one (modifies your real plan)."""
+        return await self._async_request(
+            "PATCH",
+            f"/api/paciente/changes/{plan_id}/alimento",
+            json={
+                "currentId": current_id,
+                "currentQuantity": current_quantity,
+                "alimentoId": new_id,
+                "alimentoQuantity": new_quantity,
+                "ingesta": franja,
+                "dieta": dieta,
+            },
+        )

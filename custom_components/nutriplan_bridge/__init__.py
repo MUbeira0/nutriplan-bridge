@@ -32,6 +32,8 @@ SERVICE_MARK_CHAT_READ = "marcar_chat_leido"
 SERVICE_RATE_DISH = "valorar_plato"
 SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
+SERVICE_ALIMENTO_OPTIONS = "opciones_alimento"
+SERVICE_CHANGE_ALIMENTO = "cambiar_alimento"
 SERVICE_GET_MEALS = "obtener_comidas"
 SERVICE_SHOPPING = "lista_compra"
 SERVICE_SEND_MESSAGE = "enviar_mensaje"
@@ -92,6 +94,29 @@ SHOPPING_SCHEMA = vol.Schema(
         vol.Optional("plan_id"): vol.Any(cv.positive_int, cv.string),
         vol.Optional("dias"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
         vol.Optional("todo_entity"): cv.entity_id,
+    }
+)
+
+ALIMENTO_OPTIONS_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("alimento_id"): vol.Any(cv.positive_int, cv.string),
+        vol.Required("cantidad"): vol.Coerce(float),
+    }
+)
+
+# Untyped on purpose (same reason as CHANGE_PLATO_SCHEMA): bad values are
+# validated by hand so they produce a clear message instead of a raw schema error.
+CHANGE_ALIMENTO_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("plan_id"): object,
+        vol.Required("dieta"): object,
+        vol.Required("franja"): cv.string,
+        vol.Required("alimento_actual_id"): object,
+        vol.Required("cantidad_actual"): object,
+        vol.Required("nuevo_alimento_id"): object,
+        vol.Required("nueva_cantidad"): object,
     }
 )
 
@@ -246,8 +271,83 @@ def _find_item_list(data: object) -> list:
     return max(candidates, key=_score)
 
 
+def _require_number(call: ServiceCall, key: str, label: str) -> int | float:
+    value = call.data.get(key)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HomeAssistantError(f'El campo "{label}" no es un número válido ({value!r}).') from None
+    return int(number) if number.is_integer() else number
+
+
+def normalize_alimento_options(raw: object, requested: float) -> list[dict]:
+    """Equivalent foods as the app shows them: first household measure, quantity
+    = midpoint of its min/max (falls back to the requested quantity)."""
+    options = []
+    for item in _find_item_list(raw):
+        if not isinstance(item, dict):
+            continue
+        try:
+            alimento_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        medidas = item.get("medidasCaseras")
+        first = medidas[0] if isinstance(medidas, list) and medidas and isinstance(medidas[0], dict) else {}
+        top, low = first.get("cantidadMaxima"), first.get("cantidadMinima")
+        cantidad = round((top + low) / 2, 1) if isinstance(top, (int, float)) and isinstance(low, (int, float)) else requested
+        grupo = item.get("grupoAlimento") if isinstance(item.get("grupoAlimento"), dict) else {}
+        super_grupo = grupo.get("superGrupoAlimento") if isinstance(grupo.get("superGrupoAlimento"), dict) else {}
+        options.append(
+            {
+                "alimento_id": alimento_id,
+                "nombre": item.get("nombre"),
+                "cantidad": int(cantidad) if float(cantidad).is_integer() else cantidad,
+                "medida_casera": first.get("medida"),
+                "grupo": grupo.get("nombre"),
+                "categoria": super_grupo.get("nombre"),
+            }
+        )
+    return options
+
+
+async def _async_handle_alimento_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    alimento_id = _require_int(call, "alimento_id", "ID del alimento")
+    cantidad = call.data["cantidad"]
+    try:
+        raw = await coordinator.client.async_get_alimento_options(alimento_id, cantidad)
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("buscar alimentos equivalentes", err) from err
+    return {"opciones": normalize_alimento_options(raw, cantidad)}
+
+
+async def _async_handle_change_alimento(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    coordinator = _resolve_coordinator(hass, call)
+    plan_id = _require_int(call, "plan_id", "ID del plan")
+    dieta = _require_int(call, "dieta", "Índice de la dieta")
+    franja = _require_str(call, "franja", "Franja")
+    actual_id = _require_int(call, "alimento_actual_id", "ID del alimento actual")
+    nuevo_id = _require_int(call, "nuevo_alimento_id", "ID del nuevo alimento")
+    cantidad_actual = _require_number(call, "cantidad_actual", "Cantidad actual")
+    nueva_cantidad = _require_number(call, "nueva_cantidad", "Cantidad nueva")
+    try:
+        result = await coordinator.client.async_change_alimento(
+            plan_id, dieta, franja, actual_id, cantidad_actual, nuevo_id, nueva_cantidad
+        )
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("cambiar el alimento", err) from err
+    await coordinator.async_request_refresh()
+    return {"resultado": result}
+
+
 async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
     coordinator = _resolve_coordinator(hass, call)
+    try:
+        int(call.data["plato_id"])
+    except (TypeError, ValueError):
+        raise HomeAssistantError(
+            "Este elemento no es un plato sino un alimento suelto: usa la acción opciones_alimento."
+        ) from None
     try:
         result = await coordinator.client.async_get_plato_options(call.data["plato_id"], call.data["franja"])
     except (DietoProApiError, DietoProAuthError) as err:
@@ -439,10 +539,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not _card_registered:
         try:
             www_dir = Path(__file__).parent / "www"
+            versioned = f"/nutriplan_bridge_files/v{_integration_version()}/nutriplan-bridge-card.js"
             await hass.http.async_register_static_paths(
-                [StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False)]
+                [
+                    StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False),
+                    StaticPathConfig(versioned, str(www_dir / "nutriplan-bridge-card.js"), False),
+                ]
             )
-            add_extra_js_url(hass, f"{CARD_URL_PATH}?v={_integration_version()}")
+            add_extra_js_url(hass, versioned)
             _card_registered = True
         except Exception:  # noqa: BLE001
             # Registering the card must never take the rest of the
@@ -486,6 +590,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _cancel_cita(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_cancel_cita(hass, call)
 
+        async def _alimento_options(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_alimento_options(hass, call)
+
+        async def _change_alimento(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_change_alimento(hass, call)
+
         async def _shopping(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_shopping(hass, call)
 
@@ -527,6 +637,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             _shopping,
             schema=SHOPPING_SCHEMA,
             supports_response=SupportsResponse.ONLY,
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_ALIMENTO_OPTIONS, _alimento_options, schema=ALIMENTO_OPTIONS_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_CHANGE_ALIMENTO, _change_alimento, schema=CHANGE_ALIMENTO_SCHEMA, supports_response=SupportsResponse.ONLY
         )
         hass.services.async_register(
             DOMAIN,

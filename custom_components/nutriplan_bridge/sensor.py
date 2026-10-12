@@ -219,6 +219,8 @@ def _loose_item_detail(sub: dict, kind: str, item: dict) -> dict:
         "plato_id": None,
         "super_plato_id": None,
         "tipo": kind,
+        "alimento_id": inner.get("id") if kind == "alimento" else None,
+        "cantidad": item.get("cantidad"),
         "nombre": nombre,
         "nombre_derivado": True,
         "receta": None,
