@@ -1197,6 +1197,9 @@ class NutriplanBridgeCard extends HTMLElement {
   _renderPlatoActions(plato, franja) {
     if (this._readOnly) return "";
     if (plato.subingesta_id === undefined || plato.subingesta_id === null) return "";
+    if (plato.plato_id === undefined || plato.plato_id === null) {
+      return `<div class="action-status">${plato.tipo === "suplemento" ? "Suplemento" : "Alimento suelto"}: se cambia desde la app oficial.</div>`;
+    }
     const stateKey = String(plato.subingesta_id);
     const state = this._changeState.get(stateKey) || { status: "idle" };
     const dataAttrs = `data-subingesta="${escapeHtml(stateKey)}" data-plato-id="${escapeHtml(

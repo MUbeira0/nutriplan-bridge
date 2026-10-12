@@ -53,6 +53,33 @@ def _unnamed_platos(dietas: list) -> list[dict]:
     return out[:10]
 
 
+def _loose_items(dietas: list) -> list[dict]:
+    """Keys (no values) of single foods / supplements in the plan, to know
+    which nutrition fields the API sends for them."""
+    out: list[dict] = []
+    for index, dieta in enumerate(dietas):
+        for slot in MEAL_SLOT_KEYS:
+            ingesta = dieta.get(slot) if isinstance(dieta, dict) else None
+            subs = ingesta.get("subingestas") if isinstance(ingesta, dict) else None
+            for sub in subs or []:
+                if not isinstance(sub, dict):
+                    continue
+                for kind in ("alimentoCantidad", "suplementoCantidad"):
+                    item = sub.get(kind)
+                    if isinstance(item, dict):
+                        inner = item.get("alimento") or item.get("suplemento")
+                        out.append(
+                            {
+                                "dieta": index,
+                                "franja": slot,
+                                "tipo": kind,
+                                "item_keys": sorted(item.keys()),
+                                "inner_keys": sorted(inner.keys()) if isinstance(inner, dict) else None,
+                            }
+                        )
+    return out[:6]
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     coordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data or {}
@@ -78,6 +105,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "dieta_keys": [sorted(d.keys()) if isinstance(d, dict) else None for d in dietas[:2]],
         "dieta_horarios": [d.get("nombreHorario") if isinstance(d, dict) else None for d in dietas],
         "unnamed_platos": _unnamed_platos(dietas),
+        "loose_items": _loose_items(dietas),
         "cita": async_redact_data(data.get("cita"), TO_REDACT),
         "structure": {k: _shape(v) for k, v in data.items() if k in ("seguimientos", "eni", "chat_messages", "charlas", "ratings")},
     }

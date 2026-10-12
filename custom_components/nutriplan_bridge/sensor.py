@@ -194,6 +194,48 @@ def _plato_name(sub: dict, plato: dict, super_plato: dict, ingredientes: list[di
     return " + ".join(names) + (" + …" if len(named) > 3 else ""), True
 
 
+def _loose_item_detail(sub: dict, kind: str, item: dict) -> dict:
+    """A subingesta that is a single food (alimentoCantidad) or supplement
+    (suplementoCantidad) instead of a plato: shaped like a plato so the card
+    and the shopping list treat it the same way."""
+    inner = item.get("alimento") if kind == "alimento" else item.get("suplemento")
+    inner = inner if isinstance(inner, dict) else {}
+    grupo = inner.get("grupoAlimento") if isinstance(inner.get("grupoAlimento"), dict) else {}
+    super_grupo = grupo.get("superGrupoAlimento") if isinstance(grupo.get("superGrupoAlimento"), dict) else {}
+    if not super_grupo and isinstance(inner.get("superGrupoAlimento"), dict):
+        super_grupo = inner["superGrupoAlimento"]
+    nombre_item = inner.get("nombre") or item.get("nombre")
+    ingrediente = {
+        "nombre": nombre_item,
+        "cantidad": item.get("cantidad"),
+        "medida_casera": item.get("medidaCasera"),
+        "grupo": grupo.get("nombre"),
+        "categoria": super_grupo.get("nombre"),
+    }
+    nombre, _ = _plato_name(sub, {}, {}, [ingrediente])
+    energia = item.get("energia")
+    return {
+        "subingesta_id": sub.get("id"),
+        "plato_id": None,
+        "super_plato_id": None,
+        "tipo": kind,
+        "nombre": nombre,
+        "nombre_derivado": True,
+        "receta": None,
+        "notas_raciones": item.get("observaciones"),
+        "comensales": None,
+        "duracion_min": None,
+        "rating": None,
+        "calorias": round(energia) if isinstance(energia, (int, float)) else energia,
+        "talla": None,
+        "alergenos": [],
+        "imagen": None,
+        "ingredientes": [ingrediente] if nombre_item else [],
+        "nutrientes": _nutrients(item),
+        "modificado_por_paciente": sub.get("changedByPaciente"),
+    }
+
+
 def _plato_detail(sub: Any) -> dict:
     """Expand one raw "subingesta" object into name/receta/ingredientes/allergens.
 
@@ -209,6 +251,15 @@ def _plato_detail(sub: Any) -> dict:
     """
     if not isinstance(sub, dict):
         return {}
+    if not isinstance(sub.get("plato"), dict):
+        # The app's own model (traced in its code): a subingesta is a plato, OR a
+        # lone food with its quantity (alimentoCantidad), OR a supplement
+        # (suplementoCantidad). Only the first was handled, so simple foods like
+        # a chicken breast came out as "Sin especificar".
+        if isinstance(sub.get("alimentoCantidad"), dict):
+            return _loose_item_detail(sub, "alimento", sub["alimentoCantidad"])
+        if isinstance(sub.get("suplementoCantidad"), dict):
+            return _loose_item_detail(sub, "suplemento", sub["suplementoCantidad"])
     plato = sub.get("plato") if isinstance(sub.get("plato"), dict) else {}
 
     super_plato = plato.get("superPlato") if isinstance(plato.get("superPlato"), dict) else {}
@@ -239,8 +290,10 @@ def _plato_detail(sub: Any) -> dict:
         "subingesta_id": sub.get("id"),
         "plato_id": plato.get("id"),
         "super_plato_id": super_plato.get("id"),
+        "tipo": "plato",
         "nombre": nombre,
         "nombre_derivado": nombre_derivado,
+        "modificado_por_paciente": sub.get("changedByPaciente"),
         "receta": super_plato.get("receta"),
         "notas_raciones": super_plato.get("observaciones"),
         "comensales": super_plato.get("comensales"),

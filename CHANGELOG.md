@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.2
+- Causa real de los «Sin especificar»: una subingesta puede ser un `plato`, un alimento suelto (`alimentoCantidad`) o un suplemento (`suplementoCantidad`), y solo se conocía el primero. Ahora los tres se leen (estructura sacada de la app oficial y confirmada con un diagnóstico real).
+- Los alimentos sueltos aparecen con su nombre y cantidad («Pechuga de pollo (150 g)»), cuentan en la lista de la compra y no ofrecen «Cambiar plato» (la app los cambia por otro endpoint).
+- El diagnóstico lista las claves de los alimentos sueltos para ajustar sus calorías si la API las envía.
+
 ## 0.28.1
 - Un alimento suelto (p. ej. una pechuga de pollo), que la API manda sin `superPlato`, ya no sale como «Sin especificar»: se usa el nombre del propio plato o, si no hay, el del ingrediente («Pechuga de pollo (150 g)»).
 - El diagnóstico lista la estructura de los platos que sigan sin nombre.
