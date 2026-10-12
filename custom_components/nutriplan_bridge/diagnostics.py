@@ -11,6 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import _pick_current_plan_id, dieta_index_for, plan_start_date
+from .sensor import MEAL_SLOT_KEYS, _plato_detail
 
 TO_REDACT = {
     "email", "password", "dni", "address", "phone", "mobilePhone", "fullname",
@@ -27,6 +28,29 @@ def _shape(value: Any, depth: int = 0) -> Any:
     if isinstance(value, list):
         return [f"list[{len(value)}]", _shape(value[0], depth + 1)] if value and depth < 3 else f"list[{len(value)}]"
     return type(value).__name__
+
+
+def _unnamed_platos(dietas: list) -> list[dict]:
+    """Structure (keys, no personal values) of platos that still end up with no
+    name, to see what the API sends for them."""
+    out: list[dict] = []
+    for index, dieta in enumerate(dietas):
+        for slot in MEAL_SLOT_KEYS:
+            ingesta = dieta.get(slot) if isinstance(dieta, dict) else None
+            for sub in (ingesta or {}).get("subingestas") or [] if isinstance(ingesta, dict) else []:
+                if isinstance(sub, dict) and not _plato_detail(sub).get("nombre"):
+                    plato = sub.get("plato") if isinstance(sub.get("plato"), dict) else {}
+                    out.append(
+                        {
+                            "dieta": index,
+                            "franja": slot,
+                            "sub_keys": sorted(sub.keys()),
+                            "plato_keys": sorted(plato.keys()),
+                            "superPlato": type(plato.get("superPlato")).__name__,
+                            "ingredientes": len(plato.get("alimentoCantidades") or []),
+                        }
+                    )
+    return out[:10]
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
@@ -53,6 +77,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "todays_dieta_index": dieta_index_for(today, len(dietas), start),
         "dieta_keys": [sorted(d.keys()) if isinstance(d, dict) else None for d in dietas[:2]],
         "dieta_horarios": [d.get("nombreHorario") if isinstance(d, dict) else None for d in dietas],
+        "unnamed_platos": _unnamed_platos(dietas),
         "cita": async_redact_data(data.get("cita"), TO_REDACT),
         "structure": {k: _shape(v) for k, v in data.items() if k in ("seguimientos", "eni", "chat_messages", "charlas", "ratings")},
     }

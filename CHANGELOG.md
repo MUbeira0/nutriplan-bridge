@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.1
+- Un alimento suelto (p. ej. una pechuga de pollo), que la API manda sin `superPlato`, ya no sale como «Sin especificar»: se usa el nombre del propio plato o, si no hay, el del ingrediente («Pechuga de pollo (150 g)»).
+- El diagnóstico lista la estructura de los platos que sigan sin nombre.
+
 ## 0.28.0
 - Ajustes con datos de una cuenta real: duración real de la cita, confirmaciones y permisos de la cuenta (reserva, cancelación, confirmación) que gobiernan los botones de la tarjeta.
 - Binary sensor *Cita sin confirmar*; charlas en la tarjeta; objetivo calórico y de macros por día junto al resumen del día.

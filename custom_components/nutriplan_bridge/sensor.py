@@ -164,6 +164,36 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
+def _plato_name(sub: dict, plato: dict, super_plato: dict, ingredientes: list[dict]) -> tuple[str | None, bool]:
+    """(name, derived). A recipe-style plato names itself via superPlato, but a
+    simple food added on its own (e.g. a chicken breast) has no superPlato, so
+    it showed up as "Sin especificar". Fall back to the plato's / subingesta's
+    own name, then to the ingredient(s): one ingredient -> "Pechuga de pollo
+    (150 g)", several -> "A + B + C"."""
+    for source in (super_plato, plato, sub):
+        for key in ("nombre", "name", "titulo"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip(), False
+
+    named = [i for i in ingredientes if isinstance(i.get("nombre"), str) and i["nombre"].strip()]
+    if not named:
+        return None, False
+    if len(named) == 1:
+        item = named[0]
+        name = item["nombre"].strip()
+        name = name[0].upper() + name[1:]
+        quantity = item.get("cantidad")
+        if isinstance(quantity, (int, float)) and quantity > 0:
+            name = f"{name} ({quantity:g} g)"
+        return name, True
+    names = []
+    for item in named[:3]:
+        text = item["nombre"].strip()
+        names.append(text[0].upper() + text[1:] if not names else text)
+    return " + ".join(names) + (" + …" if len(named) > 3 else ""), True
+
+
 def _plato_detail(sub: Any) -> dict:
     """Expand one raw "subingesta" object into name/receta/ingredientes/allergens.
 
@@ -201,6 +231,7 @@ def _plato_detail(sub: Any) -> dict:
             }
         )
 
+    nombre, nombre_derivado = _plato_name(sub, plato, super_plato, ingredientes)
     talla_plato = plato.get("tallaPlato") if isinstance(plato.get("tallaPlato"), dict) else {}
     image_path = super_plato.get("imagePath") or super_plato.get("thumbnail")
     energia = plato.get("energia")
@@ -208,7 +239,8 @@ def _plato_detail(sub: Any) -> dict:
         "subingesta_id": sub.get("id"),
         "plato_id": plato.get("id"),
         "super_plato_id": super_plato.get("id"),
-        "nombre": super_plato.get("nombre"),
+        "nombre": nombre,
+        "nombre_derivado": nombre_derivado,
         "receta": super_plato.get("receta"),
         "notas_raciones": super_plato.get("observaciones"),
         "comensales": super_plato.get("comensales"),
