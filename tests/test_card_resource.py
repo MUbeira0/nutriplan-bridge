@@ -57,8 +57,14 @@ def test_attribute_style_lovelace_data_also_works():
 
 def test_yaml_mode_cannot_be_edited_so_the_caller_falls_back():
     hass, res = make([], mode="yaml")
+    del res.async_create_item  # a YAML resource collection has no create method
     assert run(hass) is False
-    res.async_create_item.assert_not_called()
+
+
+def test_works_when_the_mode_field_is_missing_as_on_a_recent_home_assistant():
+    hass, res = make([], mode=None, as_dict=False)
+    assert run(hass) is True
+    res.async_create_item.assert_awaited_once()
 
 
 def test_no_lovelace_at_all():

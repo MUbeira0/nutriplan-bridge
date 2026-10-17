@@ -216,12 +216,11 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
     """
     data = hass.data.get("lovelace")
     resources = data.get("resources") if isinstance(data, dict) else getattr(data, "resources", None)
-    mode = data.get("mode") if isinstance(data, dict) else getattr(data, "mode", None)
-    if resources is None or mode != "storage" or not hasattr(resources, "async_create_item"):
-        _LOGGER.debug(
-            "Nutriplan Bridge: not registering a Lovelace resource (data=%s, mode=%r, resources=%s)",
-            type(data).__name__, mode, type(resources).__name__,
-        )
+    # Not keyed on the "mode" field: it is named differently across Home Assistant versions (it was
+    # None on a recent one). What matters is whether the collection can be edited - YAML-mode
+    # collections cannot (they have no async_create_item), storage ones can.
+    if resources is None or not hasattr(resources, "async_create_item"):
+        _LOGGER.debug("Nutriplan Bridge: not registering a Lovelace resource (data=%s)", type(data).__name__)
         return False
     try:
         await resources.async_get_info()  # loads the stored resources once
