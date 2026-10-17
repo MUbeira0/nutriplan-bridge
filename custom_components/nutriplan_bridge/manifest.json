@@ -1,9 +1,15 @@
 {
   "domain": "nutriplan_bridge",
   "name": "Nutriplan Bridge",
-  "codeowners": ["@MUbeira0"],
+  "codeowners": [
+    "@MUbeira0"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "frontend"],
+  "dependencies": [
+    "http",
+    "frontend",
+    "lovelace"
+  ],
   "documentation": "https://github.com/MUbeira0/nutriplan-bridge",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/MUbeira0/nutriplan-bridge/issues",

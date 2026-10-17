@@ -201,6 +201,42 @@ def _integration_version() -> str:
         return "0"
 
 
+RESOURCE_PREFIX = "/nutriplan_bridge_files/v"
+
+
+async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bool:
+    """Register the card as a Lovelace *resource* (what HACS does for cards).
+
+    Home Assistant also offers add_extra_js_url(), which injects the script into the page
+    before the frontend has started. In a real recent Home Assistant that script runs, but the
+    element it defines is gone by the time the dashboard renders ("Error de configuración" on
+    the card) - found with an end-to-end run. A resource is loaded by Lovelace itself once the
+    frontend is up, so it always works. Returns False when that is not possible (YAML-mode
+    dashboards: those users keep the extra-JS fallback or add the resource by hand).
+    """
+    data = hass.data.get("lovelace")
+    resources = data.get("resources") if isinstance(data, dict) else getattr(data, "resources", None)
+    mode = data.get("mode") if isinstance(data, dict) else getattr(data, "mode", None)
+    if resources is None or mode != "storage" or not hasattr(resources, "async_create_item"):
+        return False
+    try:
+        await resources.async_get_info()  # loads the stored resources once
+        present = False
+        for item in list(resources.async_items() or []):
+            item_url = str(item.get("url", ""))
+            if item_url == url:
+                present = True
+            elif item_url.startswith(RESOURCE_PREFIX):
+                # an older versioned copy registered by this integration
+                await resources.async_delete_item(item["id"])
+        if not present:
+            await resources.async_create_item({"res_type": "module", "url": url})
+        return True
+    except Exception:  # noqa: BLE001 - never break setup over a dashboard resource
+        _LOGGER.exception("Nutriplan Bridge: could not register the card as a Lovelace resource")
+        return False
+
+
 def _resolve_coordinator(hass: HomeAssistant, call: ServiceCall) -> DietoProDataUpdateCoordinator:
     coordinators: dict[str, DietoProDataUpdateCoordinator] = hass.data.get(DOMAIN, {})
     entry_id = call.data.get("config_entry_id")
@@ -737,7 +773,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                     StaticPathConfig(versioned, str(www_dir / "nutriplan-bridge-card.js"), False),
                 ]
             )
-            add_extra_js_url(hass, versioned)
+            if not await _async_register_lovelace_resource(hass, versioned):
+                add_extra_js_url(hass, versioned)
             _card_registered = True
         except Exception:  # noqa: BLE001
             # Registering the card must never take the rest of the
