@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -18,9 +19,18 @@ SEEDS = (
 )
 
 
+def _base_components(core: Path) -> set[str]:
+    """Home Assistant imports a set of "base" integrations just to validate any services.yaml
+    (service.py::_base_components) - and they need their own packages (hassil, ...)."""
+    source = (core / "helpers" / "service.py").read_text(encoding="utf-8")
+    match = re.search(r"def _base_components\(.*?from homeassistant\.components import \((.*?)\)", source, re.S)
+    return set(re.findall(r"[a-z_0-9]+", match.group(1))) - {"noqa", "PLC0415"} if match else set()
+
+
 def closure() -> tuple[set[str], set[str]]:
     spec = importlib.util.find_spec("homeassistant")
-    components = Path(list(spec.submodule_search_locations)[0]) / "components"
+    core = Path(list(spec.submodule_search_locations)[0])
+    components = core / "components"
     seen: set[str] = set()
     requirements: set[str] = set()
 
@@ -36,7 +46,7 @@ def closure() -> tuple[set[str], set[str]]:
         for dependency in data.get("dependencies", []):
             visit(dependency)
 
-    for seed in SEEDS:
+    for seed in (*SEEDS, *sorted(_base_components(core))):
         visit(seed)
     return seen, requirements
 
