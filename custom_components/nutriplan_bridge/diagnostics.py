@@ -75,6 +75,10 @@ def _loose_items(dietas: list) -> list[dict]:
                                 "tipo": kind,
                                 "item_keys": sorted(item.keys()),
                                 "inner_keys": sorted(inner.keys()) if isinstance(inner, dict) else None,
+                                # Food-composition numbers, not personal data: lets the kcal estimate be sanity-checked.
+                                "energia_alimento": inner.get("energia") if isinstance(inner, dict) else None,
+                                "energia_item": item.get("energia"),
+                                "cantidad": item.get("cantidad"),
                             }
                         )
     return out[:6]

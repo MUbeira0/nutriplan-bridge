@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.30.0
+- Comidas tomadas guardadas en Home Assistant (sensor *Comidas tomadas hoy*, acción `marcar_comida`), compartidas entre dispositivos, con cumplimiento semanal e historial.
+- Avisos en Reparaciones (DietoPro no responde, formato de plan inesperado) y reautenticación real si caduca la contraseña.
+- Calorías estimadas para alimentos sueltos (marcadas con «~»). 105 tests.
+
 ## 0.29.1
 - Corrige el error «async_write_ha_state from a thread» que aparecía cada minuto (sensor Próxima comida) y cada 5 minutos (binary sensor Cita en 24 h): el refresco periódico era un `lambda`, que Home Assistant ejecuta en un hilo aparte; ahora es un `@callback` en el bucle de eventos. Desde la 0.23.0.
 - Test que impide volver a pasar un `lambda` a los temporizadores de Home Assistant. 93 tests.

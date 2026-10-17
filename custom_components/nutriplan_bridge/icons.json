@@ -38,6 +38,9 @@
     },
     "cambiar_alimento": {
       "service": "mdi:swap-horizontal-variant"
+    },
+    "marcar_comida": {
+      "service": "mdi:check-circle"
     }
   }
 }

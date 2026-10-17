@@ -432,3 +432,39 @@ cambiar_alimento:
           min: 0
           max: 5000
           mode: box
+
+marcar_comida:
+  name: Marcar comida como tomada
+  description: >-
+    Marca (o desmarca) una comida del día como tomada. Se guarda solo en Home
+    Assistant (no se envía nada a DietoPro) y alimenta el sensor "Comidas
+    tomadas hoy" y el cumplimiento semanal.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    franja:
+      name: Franja
+      description: desayuno, tentempie1, comida, merienda1, cena...
+      required: true
+      selector:
+        text:
+    tomada:
+      name: Tomada
+      description: Desactívalo para desmarcarla.
+      required: false
+      default: true
+      selector:
+        boolean:
+    fecha:
+      name: Fecha
+      description: Por defecto, hoy.
+      required: false
+      selector:
+        date:

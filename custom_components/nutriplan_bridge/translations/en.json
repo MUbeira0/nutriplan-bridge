@@ -36,5 +36,15 @@
         }
       }
     }
+  },
+  "issues": {
+    "api_unreachable": {
+      "title": "DietoPro is not responding",
+      "description": "Nutriplan Bridge could not fetch data from DietoPro in the last {failures} updates in a row. Check your connection or whether DietoPro is down; it will recover on its own once it answers again."
+    },
+    "plan_format": {
+      "title": "The plan has an unexpected format",
+      "description": "DietoPro returned the plan without the list of days this integration expects. Their API may have changed. Download the diagnostics (Settings → Devices & services → Nutriplan Bridge) and share them on the integration's repository."
+    }
   }
 }

@@ -73,6 +73,7 @@ const ENTITY_FIELDS = [
   { key: "chat_entity", suffix: "_mensajes_sin_leer", label: "Mensajes sin leer" },
   { key: "charlas_entity", suffix: "_charlas", label: "Charlas" },
   { key: "eni_entity", suffix: "_estado_eni", label: "Encuesta inicial (objetivos)" },
+  { key: "eaten_entity", suffix: "_comidas_tomadas_hoy", label: "Comidas tomadas hoy" },
 ];
 
 function formatShortDate(iso) {
@@ -295,7 +296,8 @@ class NutriplanBridgeCard extends HTMLElement {
     this._weekCache = new Map();
     this._weekLoading = new Set();
     this._weekError = new Map();
-    this._eaten = loadEaten();
+    this._eaten = loadEaten(); // local fallback, only used when the HA sensor is missing
+    this._optimistic = new Map(); // franja -> bool, shown until HA confirms the new state
     this._weekView = false;
     this._chatOpen = false;
     this._chartOpen = false;
@@ -337,6 +339,7 @@ class NutriplanBridgeCard extends HTMLElement {
       findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer"),
       findEntity(hass, cfg.charlas_entity, "_charlas"),
       findEntity(hass, cfg.eni_entity, "_estado_eni"),
+      findEntity(hass, cfg.eaten_entity, "_comidas_tomadas_hoy"),
     ];
     const changed = !this._lastEntities || entities.some((e, i) => e !== this._lastEntities[i]);
     this._lastEntities = entities;
@@ -345,6 +348,7 @@ class NutriplanBridgeCard extends HTMLElement {
       // cached copy of the current plan's week is potentially stale.
       this._weekCache.delete("current");
       this._weekError.delete("current");
+      this._optimistic.clear();
       const typing = this.shadowRoot.activeElement;
       if (!(typing && typing.matches && typing.matches("textarea"))) this._safeRender();
     }
@@ -787,7 +791,26 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
+  _eatenSet() {
+    const entity = this._eatenEntity;
+    if (!entity) return this._eaten;
+    const set = new Set((entity.attributes && entity.attributes.tomadas) || []);
+    this._optimistic.forEach((on, franja) => (on ? set.add(franja) : set.delete(franja)));
+    return set;
+  }
+
   _toggleEaten(franja) {
+    if (this._eatenEntity) {
+      const now = !this._eatenSet().has(franja);
+      this._optimistic.set(franja, now);
+      this._safeRender();
+      this._callService("marcar_comida", this._withAccount({ franja, tomada: now })).catch((err) => {
+        console.error("nutriplan-bridge-card: marcar_comida failed", err);
+        this._optimistic.delete(franja);
+        this._safeRender();
+      });
+      return;
+    }
     if (this._eaten.has(franja)) this._eaten.delete(franja);
     else this._eaten.add(franja);
     saveEaten(this._eaten);
@@ -1338,7 +1361,7 @@ class NutriplanBridgeCard extends HTMLElement {
         ? ""
         : '<div class="plato-img-placeholder"><ha-icon icon="mdi:food"></ha-icon></div>';
     const metaParts = [];
-    if (plato.calorias) metaParts.push(`${escapeHtml(plato.calorias)} kcal`);
+    if (plato.calorias) metaParts.push(`${plato.calorias_estimadas ? "~" : ""}${escapeHtml(plato.calorias)} kcal`);
     if (plato.comensales) metaParts.push(`${escapeHtml(plato.comensales)} ${Number(plato.comensales) === 1 ? "comensal" : "comensales"}`);
     if (plato.duracion_min) metaParts.push(`${escapeHtml(plato.duracion_min)} min`);
     const meta = metaParts.length ? `<div class="meal-meta">${metaParts.join(" · ")}</div>` : "";
@@ -1395,7 +1418,9 @@ class NutriplanBridgeCard extends HTMLElement {
       this._imgOk(thumbSrc)
         ? `<img class="meal-thumb" data-fallback-icon="mdi:food" src="${escapeHtml(thumbSrc)}" alt="" loading="lazy" />`
         : `<ha-icon class="meal-type" icon="mdi:food"></ha-icon>`;
-    const kcal = plato.calorias ? `<div class="plato-summary-kcal">${escapeHtml(plato.calorias)} kcal</div>` : "";
+    const kcal = plato.calorias
+      ? `<div class="plato-summary-kcal" ${plato.calorias_estimadas ? 'title="Estimación a partir de la composición del alimento"' : ""}>${plato.calorias_estimadas ? "~" : ""}${escapeHtml(plato.calorias)} kcal</div>`
+      : "";
 
     return `
       <div class="plato-row">
@@ -1433,7 +1458,7 @@ class NutriplanBridgeCard extends HTMLElement {
     }
 
     const isNext = ctx.nextFranja === franja;
-    const isEaten = ctx.eatenEnabled && this._eaten.has(franja);
+    const isEaten = ctx.eatenEnabled && this._eatenSet().has(franja);
     const isPast = ctx.pastFranjas && ctx.pastFranjas.has(franja) && !isNext;
     const eatenHtml = ctx.eatenEnabled
       ? `<ha-icon class="eaten-toggle${isEaten ? " done" : ""}" data-franja="${escapeHtml(franja)}" role="checkbox" tabindex="0" aria-checked="${!!isEaten}" aria-label="Marcar como tomada" icon="${
@@ -1480,6 +1505,7 @@ class NutriplanBridgeCard extends HTMLElement {
     if (cfg.accent_color) card.style.setProperty("--primary-color", cfg.accent_color);
     else card.style.removeProperty("--primary-color");
     card.classList.toggle("compact", cfg.compact === true);
+    this._eatenEntity = findEntity(hass, cfg.eaten_entity, "_comidas_tomadas_hoy");
     const planAttrs = (planEntity && planEntity.attributes) || {};
     const chatEntity = findEntity(hass, cfg.chat_entity, "_mensajes_sin_leer");
     const todayIndex = mealsAttrs.dieta_index;
@@ -1562,11 +1588,15 @@ class NutriplanBridgeCard extends HTMLElement {
       mealsHtml = `<div class="meals">${meals.map((m) => this._renderMeal(m, mealLabels, ctx)).join("")}</div>`;
       if (ctx.eatenEnabled) {
         const total = Math.round((resumen && resumen.energia_kcal) || meals.reduce((a, m) => a + mealKcal(m), 0));
-        const eatenKcal = Math.round(meals.filter((m) => this._eaten.has(m.franja)).reduce((a, m) => a + mealKcal(m), 0));
+        const eatenKcal = Math.round(meals.filter((m) => this._eatenSet().has(m.franja)).reduce((a, m) => a + mealKcal(m), 0));
         if (total) {
           mealsHtml =
             `<div class="progress"><div style="width:${Math.min(100, (eatenKcal / total) * 100).toFixed(1)}%"></div></div>` +
-            `<div class="progress-label">${eatenKcal} / ${total} kcal tomadas hoy</div>` +
+            `<div class="progress-label">${eatenKcal} / ${total} kcal tomadas hoy${
+              this._eatenEntity && this._eatenEntity.attributes && this._eatenEntity.attributes.cumplimiento_semana != null
+                ? ` · semana: ${this._eatenEntity.attributes.cumplimiento_semana}% (${this._eatenEntity.attributes.tomadas_semana}/${this._eatenEntity.attributes.planificadas_semana})`
+                : ""
+            }</div>` +
             mealsHtml;
         }
       }

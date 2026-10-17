@@ -159,6 +159,27 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.30
+
+- **Comidas tomadas, compartidas entre dispositivos.** Antes las marcas se
+  guardaban solo en cada navegador. Ahora viven en Home Assistant (nuevo sensor
+  *Comidas tomadas hoy* y acción `marcar_comida`): lo que marcas en el móvil
+  lo ves en el PC. El sensor calcula también el **cumplimiento de la semana**
+  (comidas tomadas / planificadas) y un historial de 14 días. No se envía
+  nada a DietoPro. Si el sensor no existe, la tarjeta sigue usando el
+  almacenamiento local.
+- **Avisos en Ajustes → Reparaciones:** "DietoPro no responde" tras 3
+  actualizaciones seguidas sin datos, y "el plan tiene un formato inesperado"
+  (por si DietoPro cambia su API). Se borran solos al recuperarse.
+- **Contraseña caducada:** ahora abre el flujo de reautenticación de Home
+  Assistant en vez de dejar la integración simplemente fallando.
+- **Calorías de alimentos sueltos estimadas** a partir de su composición (por
+  100 g) y la cantidad; se muestran con "~". Si la API envía las calorías
+  reales, se usan esas. El diagnóstico incluye los valores para poder
+  comprobarlo.
+- Las consultas a DietoPro se mantienen como estaban (todas las fuentes en cada
+  actualización) para que cualquier cambio hecho en la app oficial se vea.
+
 ## Novedades 0.29
 
 - **Alimentos sueltos** (p. ej. "Pollo, pechuga, solomillo (130 g)"): ahora se

@@ -97,3 +97,22 @@ def test_loose_food_exposes_ids_needed_to_swap_it():
     sub = {"id": "9", "alimentoCantidad": {"cantidad": 130, "alimento": {"id": 4321, "nombre": "Pollo"}}}
     d = sensor._plato_detail(sub)
     assert d["alimento_id"] == 4321 and d["cantidad"] == 130
+
+
+def test_loose_food_kcal_is_estimated_from_per_100g_composition():
+    sub = {"id": "1", "alimentoCantidad": {"cantidad": 130, "alimento": {"id": 1, "nombre": "Pollo", "energia": 120, "proteinasTotales": 23}}}
+    d = sensor._plato_detail(sub)
+    assert d["calorias"] == 156 and d["calorias_estimadas"] is True
+    assert d["nutrientes"]["proteinas_g"] == 29.9
+
+
+def test_loose_food_real_energy_wins_over_the_estimate():
+    sub = {"id": "1", "alimentoCantidad": {"cantidad": 130, "energia": 100, "alimento": {"nombre": "Pollo", "energia": 120}}}
+    d = sensor._plato_detail(sub)
+    assert d["calorias"] == 100 and d["calorias_estimadas"] is False
+
+
+def test_loose_food_without_any_energy_has_no_calories():
+    sub = {"id": "1", "alimentoCantidad": {"cantidad": 130, "alimento": {"nombre": "Pollo"}}}
+    d = sensor._plato_detail(sub)
+    assert d["calorias"] is None and d["calorias_estimadas"] is False

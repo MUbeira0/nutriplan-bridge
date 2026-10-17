@@ -22,7 +22,8 @@ from homeassistant.util import dt as dt_util
 from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
 from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
-from .sensor import _plato_detail, normalize_slots, shape_day, shopping_list
+from .eaten import EatenStore
+from .sensor import MEAL_SLOT_KEYS, _plato_detail, normalize_slots, shape_day, shopping_list
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ SERVICE_MARK_CHAT_READ = "marcar_chat_leido"
 SERVICE_RATE_DISH = "valorar_plato"
 SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
+SERVICE_MARK_EATEN = "marcar_comida"
 SERVICE_ALIMENTO_OPTIONS = "opciones_alimento"
 SERVICE_CHANGE_ALIMENTO = "cambiar_alimento"
 SERVICE_GET_MEALS = "obtener_comidas"
@@ -117,6 +119,15 @@ CHANGE_ALIMENTO_SCHEMA = vol.Schema(
         vol.Required("cantidad_actual"): object,
         vol.Required("nuevo_alimento_id"): object,
         vol.Required("nueva_cantidad"): object,
+    }
+)
+
+MARK_EATEN_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        vol.Required("franja"): cv.string,
+        vol.Optional("tomada", default=True): cv.boolean,
+        vol.Optional("fecha"): cv.date,
     }
 )
 
@@ -338,6 +349,17 @@ async def _async_handle_change_alimento(hass: HomeAssistant, call: ServiceCall) 
         raise _friendly_error("cambiar el alimento", err) from err
     await coordinator.async_request_refresh()
     return {"resultado": result}
+
+
+async def _async_handle_mark_eaten(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Tick (or untick) a meal as eaten. Local to Home Assistant: nothing is sent to DietoPro."""
+    coordinator = _resolve_coordinator(hass, call)
+    if coordinator.eaten is None:
+        raise HomeAssistantError("El registro de comidas tomadas no está disponible todavía.")
+    franja = call.data["franja"]
+    if franja not in MEAL_SLOT_KEYS:
+        raise HomeAssistantError(f'Franja desconocida: "{franja}". Usa una de: {", ".join(MEAL_SLOT_KEYS)}.')
+    coordinator.eaten.mark(call.data.get("fecha") or dt_util.now().date(), franja, call.data["tomada"])
 
 
 async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
@@ -596,6 +618,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _change_alimento(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_change_alimento(hass, call)
 
+        async def _mark_eaten(call: ServiceCall) -> None:
+            await _async_handle_mark_eaten(hass, call)
+
         async def _shopping(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_shopping(hass, call)
 
@@ -631,6 +656,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         hass.services.async_register(
             DOMAIN, SERVICE_CANCEL_CITA, _cancel_cita, schema=CITA_ID_SCHEMA, supports_response=SupportsResponse.ONLY
         )
+        hass.services.async_register(DOMAIN, SERVICE_MARK_EATEN, _mark_eaten, schema=MARK_EATEN_SCHEMA)
         hass.services.async_register(
             DOMAIN,
             SERVICE_SHOPPING,
@@ -673,6 +699,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     interval = entry.options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     coordinator = DietoProDataUpdateCoordinator(hass, client, interval, entry.entry_id)
+    coordinator.eaten = EatenStore(hass, entry.entry_id)
+    await coordinator.eaten.async_load()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

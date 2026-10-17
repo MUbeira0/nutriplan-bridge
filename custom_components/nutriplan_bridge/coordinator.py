@@ -6,6 +6,8 @@ import re
 from datetime import date, timedelta
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -13,6 +15,9 @@ from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Show a Repairs notice after this many refreshes in a row where nothing could be fetched.
+UNREACHABLE_AFTER = 3
 
 
 _TITLE_DATE_RE = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})")
@@ -129,6 +134,26 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
         )
         self.client = client
         self._entry_id = entry_id
+        self._failures = 0
+        self.eaten = None  # EatenStore, attached by async_setup_entry
+
+    def _set_issue(self, key: str, active: bool, **placeholders: str) -> None:
+        """Create/clear a Settings -> Repairs notice for this account."""
+        if not self._entry_id:
+            return
+        issue_id = f"{key}_{self._entry_id}"
+        if active:
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=key,
+                translation_placeholders=placeholders or None,
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _fire_change_events(self, new: dict) -> None:
         """Bus events for automations: a different plan took effect, a new
@@ -160,7 +185,8 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
         try:
             results["plans"] = await self.client.async_get_plans()
         except DietoProAuthError as err:
-            raise UpdateFailed(f"Authentication with DietoPro failed: {err}") from err
+            # Real reauth flow (asks for the new password) instead of a plain failure.
+            raise ConfigEntryAuthFailed(f"Authentication with DietoPro failed: {err}") from err
         except DietoProApiError as err:
             _LOGGER.warning("DietoPro: could not fetch plans: %s", err)
             results["plans"] = None
@@ -186,7 +212,7 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             try:
                 results[key] = await coro
             except DietoProAuthError as err:
-                raise UpdateFailed(f"Authentication with DietoPro failed: {err}") from err
+                raise ConfigEntryAuthFailed(f"Authentication with DietoPro failed: {err}") from err
             except DietoProApiError as err:
                 _LOGGER.warning("DietoPro: could not fetch %s: %s", key, err)
                 results[key] = None
@@ -195,7 +221,17 @@ class DietoProDataUpdateCoordinator(DataUpdateCoordinator[dict]):
             # Every endpoint failed (DietoPro down, network cut...): without
             # this the update "succeeded" with all-None data, so sensors read
             # unknown and the card claimed "Sin plan activo" / "Sin comidas".
+            self._failures += 1
+            if self._failures >= UNREACHABLE_AFTER:
+                self._set_issue("api_unreachable", True, failures=str(self._failures))
             raise UpdateFailed("DietoPro did not return data for any endpoint")
+
+        self._failures = 0
+        self._set_issue("api_unreachable", False)
+        # The plan came back but not in the shape this integration understands: DietoPro
+        # probably changed its API. Say so in Repairs instead of silently showing nothing.
+        detail = results.get("plan_detail")
+        self._set_issue("plan_format", isinstance(detail, dict) and not isinstance(detail.get("dietas"), list))
 
         self._fire_change_events(results)
         return results

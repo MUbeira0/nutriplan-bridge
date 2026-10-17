@@ -214,6 +214,26 @@ def _loose_item_detail(sub: dict, kind: str, item: dict) -> dict:
     }
     nombre, _ = _plato_name(sub, {}, {}, [ingrediente])
     energia = item.get("energia")
+    nutrientes = _nutrients(item)
+    estimadas = False
+    cantidad = item.get("cantidad")
+    per_100 = inner.get("energia")
+    if (
+        not isinstance(energia, (int, float))
+        and isinstance(per_100, (int, float))
+        and isinstance(cantidad, (int, float))
+        and cantidad > 0
+    ):
+        # The food record only carries its composition (food tables are per 100 g),
+        # so scale it by the quantity. Marked as an estimate in the card.
+        factor = cantidad / 100
+        nutrientes = {
+            key: round(value * factor, 2) if isinstance(value, (int, float)) else value
+            for key, value in _nutrients(inner).items()
+        }
+        nutrientes["energia_kcal_100g"] = per_100
+        energia = per_100 * factor
+        estimadas = True
     return {
         "subingesta_id": sub.get("id"),
         "plato_id": None,
@@ -229,11 +249,12 @@ def _loose_item_detail(sub: dict, kind: str, item: dict) -> dict:
         "duracion_min": None,
         "rating": None,
         "calorias": round(energia) if isinstance(energia, (int, float)) else energia,
+        "calorias_estimadas": estimadas,
         "talla": None,
         "alergenos": [],
         "imagen": None,
         "ingredientes": [ingrediente] if nombre_item else [],
-        "nutrientes": _nutrients(item),
+        "nutrientes": nutrientes,
         "modificado_por_paciente": sub.get("changedByPaciente"),
     }
 
@@ -482,6 +503,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             DietoProValoracionesSensor(coordinator, entry),
             DietoProCharlasSensor(coordinator, entry),
             DietoProTodayEnergySensor(coordinator, entry),
+            DietoProEatenSensor(coordinator, entry),
             DietoProNextMealSensor(coordinator, entry),
             *(
                 DietoProMetricSensor(coordinator, entry, *spec)
@@ -1414,3 +1436,79 @@ def normalize_slots(data: Any) -> list[dict]:
         for item in slots:
             add(None, item)
     return [slot for slot in out if slot.get("hora") is not None]
+
+
+class DietoProEatenSensor(DietoProTodayMealsSensor):
+    """Meals ticked as eaten today (stored in Home Assistant, shared by every
+    device) plus adherence over the last week."""
+
+    _attr_icon = "mdi:check-circle-outline"
+    _unrecorded_attributes = frozenset({"historial"})
+
+    def __init__(self, coordinator, entry) -> None:
+        DietoProEntity.__init__(self, coordinator, entry, "comidas_tomadas_hoy", "Comidas tomadas hoy")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        store = getattr(self.coordinator, "eaten", None)
+        if store is not None:
+            self.async_on_remove(store.add_listener(self._on_eaten_changed))
+
+    @callback
+    def _on_eaten_changed(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def entity_picture(self) -> None:
+        return None
+
+    def _eaten_on(self, day) -> set[str]:
+        store = getattr(self.coordinator, "eaten", None)
+        return store.get(day) if store is not None else set()
+
+    def _planned_on(self, day) -> list[dict]:
+        dietas = self._dietas()
+        plan = (self.coordinator.data or {}).get("plan_detail")
+        start = plan_start_date(plan) if isinstance(plan, dict) else None
+        index = dieta_index_for(day, len(dietas), start)
+        return [m for m in shape_meals(dietas[index]) if m.get("platos")] if index is not None else []
+
+    def _day(self, day) -> tuple[list[str], list[str], list[dict]]:
+        planned = self._planned_on(day)
+        planned_keys = [m["franja"] for m in planned]
+        eaten = [f for f in sorted(self._eaten_on(day)) if f in planned_keys]
+        return eaten, planned_keys, planned
+
+    @property
+    def native_value(self) -> int:
+        return len(self._day(dt_util.now().date())[0])
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        today = dt_util.now().date()
+        eaten, planned_keys, planned = self._day(today)
+        kcal = lambda meals: sum(  # noqa: E731
+            p.get("calorias") or 0 for m in meals for p in (m.get("platos") or []) if isinstance(p.get("calorias"), (int, float))
+        )
+        historial: dict[str, dict] = {}
+        week_eaten = week_planned = 0
+        for offset in range(13, -1, -1):
+            day = today - timedelta(days=offset)
+            d_eaten, d_planned, _ = self._day(day)
+            if d_planned:
+                historial[day.isoformat()] = {"tomadas": len(d_eaten), "planificadas": len(d_planned)}
+            if offset < 7:
+                week_eaten += len(d_eaten)
+                week_planned += len(d_planned)
+        pct = lambda a, b: round(100 * a / b) if b else None  # noqa: E731
+        return {
+            "tomadas": eaten,
+            "planificadas": planned_keys,
+            "kcal_tomadas": round(kcal([m for m in planned if m["franja"] in eaten])),
+            "kcal_planificadas": round(kcal(planned)),
+            "cumplimiento_hoy": pct(len(eaten), len(planned_keys)),
+            "cumplimiento_semana": pct(week_eaten, week_planned),
+            "tomadas_semana": week_eaten,
+            "planificadas_semana": week_planned,
+            "historial": historial,
+        }
