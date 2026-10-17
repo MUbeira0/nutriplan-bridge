@@ -41,7 +41,33 @@ def page(ha, entry):
         pg.on("pageerror", lambda e: pg.errors.append(str(e)))
         pg.on("dialog", lambda d: d.accept())  # the card asks window.confirm() before writing to the account
         pg.goto(f"{BASE}/lovelace/nutri")
-        pg.wait_for_selector("nutriplan-bridge-card .meal-card", timeout=120000)
+        try:
+            pg.wait_for_selector("nutriplan-bridge-card .meal-card", timeout=120000)
+        except Exception:
+            # Keep evidence of what the browser actually saw.
+            pg.screenshot(path=str(ARTIFACTS / "failure.png"), full_page=True)
+            info = pg.evaluate(
+                """() => {
+                    const deep = (root, depth = 0) => {
+                        if (!root || depth > 12) return '';
+                        let out = '';
+                        for (const el of root.querySelectorAll('*')) {
+                            if (el.shadowRoot) out += deep(el.shadowRoot, depth + 1);
+                        }
+                        return out;
+                    };
+                    const card = document.querySelector('nutriplan-bridge-card');
+                    return {
+                        url: location.href,
+                        hasElementDefinition: !!customElements.get('nutriplan-bridge-card'),
+                        cardPresent: !!card,
+                        cardHtml: card && card.shadowRoot ? card.shadowRoot.innerHTML.slice(0, 1500) : null,
+                        extraJs: [...document.querySelectorAll('script')].map(s => s.src).filter(Boolean),
+                    };
+                }"""
+            )
+            (ARTIFACTS / "failure.json").write_text(json.dumps({"info": info, "errors": pg.errors[-40:]}, indent=2, ensure_ascii=False), encoding="utf-8")
+            raise
         yield pg
         pg.screenshot(path=str(ARTIFACTS / "final.png"), full_page=True)
         browser.close()
