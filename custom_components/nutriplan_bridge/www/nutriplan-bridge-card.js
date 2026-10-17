@@ -384,7 +384,28 @@ class NutriplanBridgeCard extends HTMLElement {
     return document.createElement("nutriplan-bridge-card-editor");
   }
 
+  // While the OS file picker is open the card must not repaint: a refresh would replace the
+  // <input type=file> and the selection (change event on a detached element) would be lost.
+  _startPicking() {
+    this._pickingFile = true;
+    clearTimeout(this._pickTimer);
+    this._pickTimer = setTimeout(() => this._endPicking(), 120000);
+  }
+
+  _endPicking() {
+    clearTimeout(this._pickTimer);
+    this._pickingFile = false;
+    if (this._renderPending) {
+      this._renderPending = false;
+      this._safeRender();
+    }
+  }
+
   _safeRender() {
+    if (this._pickingFile) {
+      this._renderPending = true;
+      return;
+    }
     try {
       this._render();
     } catch (err) {
@@ -783,6 +804,7 @@ class NutriplanBridgeCard extends HTMLElement {
     if (fileInput) {
       const file = fileInput.files && fileInput.files[0];
       fileInput.value = "";
+      this._endPicking();
       this._uploadChatFile(file);
       return;
     }
@@ -1143,6 +1165,7 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleClick(ev) {
+    if (ev.target.closest(".chat-attach")) this._startPicking();
     if (ev.target.closest(".meas-open")) {
       this._openMeasurement();
       return;

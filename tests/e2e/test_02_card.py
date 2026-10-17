@@ -198,7 +198,10 @@ def test_chat_attachment_goes_through_the_upload_endpoint(page, fake, tmp_path):
     img = tmp_path / "comida.jpg"
     img.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
     fake.state.requests.clear()
-    page.locator("nutriplan-bridge-card .chat-file").set_input_files(str(img))
+    # like a person: press "Adjuntar" and choose the file in the picker
+    with page.expect_file_chooser() as chooser:
+        page.locator("nutriplan-bridge-card .chat-attach").click()
+    chooser.value.set_files(str(img))
     page.locator("nutriplan-bridge-card .chat-panel .action-status", has_text="Enviado: comida.jpg").wait_for(timeout=45000)
     deadline = time.time() + 30
     while time.time() < deadline and not fake.state.calls("POST", "/api/paciente/chat/images"):
