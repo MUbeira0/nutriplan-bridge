@@ -22,7 +22,12 @@ ARTIFACTS = Path(os.environ.get("E2E_ARTIFACTS", "e2e-artifacts"))
 def page(ha, entry):
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     # A dashboard with just the card (auto-detected entities, nothing configured).
-    saved = ha.ws({"type": "lovelace/config/save", "config": {"title": "e2e", "views": [{"title": "Nutriplan", "path": "nutri", "cards": [{"type": "custom:nutriplan-bridge-card"}]}]}})
+    # A dedicated dashboard: the default one is the new auto-generated "Resumen" in recent Home Assistant.
+    created = ha.ws({"type": "lovelace/dashboards/create", "url_path": "nutriplan-e2e", "title": "Nutriplan", "icon": "mdi:food-apple",
+                     "show_in_sidebar": True, "require_admin": False, "allow_single_word": False})
+    assert created.get("success"), created
+    saved = ha.ws({"type": "lovelace/config/save", "url_path": "nutriplan-e2e",
+                   "config": {"title": "e2e", "views": [{"title": "Nutriplan", "path": "nutri", "cards": [{"type": "custom:nutriplan-bridge-card"}]}]}})
     assert saved.get("success"), saved
 
     tokens = {
@@ -54,7 +59,7 @@ def page(ha, entry):
         pg.on("requestfailed", lambda r: pg.errors.append(f"requestfailed {r.url} {r.failure}"))
         pg.on("websocket", lambda ws: (ws.on("framesent", lambda f: pg.ws_frames.append(("sent", str(f)[:300]))), ws.on("framereceived", lambda f: pg.ws_frames.append(("recv", str(f)[:300])))))
         pg.on("dialog", lambda d: d.accept())  # the card asks window.confirm() before writing to the account
-        pg.goto(f"{BASE}/lovelace/nutri")
+        pg.goto(f"{BASE}/nutriplan-e2e/nutri")
         try:
             pg.wait_for_selector("nutriplan-bridge-card .meal-card", timeout=120000)
         except Exception:
