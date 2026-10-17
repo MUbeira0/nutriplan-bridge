@@ -245,10 +245,20 @@ function sparkline(values) {
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--primary-color)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${last[0]}" cy="${last[1]}" r="2.5" fill="var(--primary-color)"/></svg>`;
 }
 
+// Entity ids come from the entity NAMES ("Comidas de hoy" -> ..._comidas_de_hoy), but the
+// card was written against the older ids (..._comidas_hoy, ..._estado_eni) that existing
+// installs still have (Home Assistant keeps an entity's id after a rename). A fresh install
+// gets the new spelling, so look for both - otherwise the card finds nothing on a new setup.
+const SUFFIX_ALIASES = {
+  _comidas_hoy: ["_comidas_hoy", "_comidas_de_hoy"],
+  _estado_eni: ["_estado_eni", "_encuesta_inicial"],
+};
+
 function findEntity(hass, explicitId, suffix) {
   if (explicitId && hass.states[explicitId]) return hass.states[explicitId];
+  const suffixes = SUFFIX_ALIASES[suffix] || [suffix];
   const match = Object.keys(hass.states).find(
-    (id) => id.startsWith("sensor.nutriplan_bridge_") && id.endsWith(suffix)
+    (id) => id.startsWith("sensor.nutriplan_bridge_") && suffixes.some((sfx) => id.endsWith(sfx))
   );
   return match ? hass.states[match] : undefined;
 }

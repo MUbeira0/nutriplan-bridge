@@ -8,8 +8,8 @@ pytestmark = pytest.mark.e2e
 
 def test_setup_creates_the_expected_entities(ha, entry):
     ids = {
-        ("sensor", "_plan_actual"), ("sensor", "_comidas_hoy"), ("sensor", "_proxima_cita"), ("sensor", "_seguimientos"),
-        ("sensor", "_dietista"), ("sensor", "_mensajes_sin_leer"), ("sensor", "_estado_eni"), ("sensor", "_charlas"),
+        ("sensor", "_plan_actual"), ("sensor", "_comidas_de_hoy"), ("sensor", "_proxima_cita"), ("sensor", "_seguimientos"),
+        ("sensor", "_dietista"), ("sensor", "_mensajes_sin_leer"), ("sensor", "_encuesta_inicial"), ("sensor", "_charlas"),
         ("sensor", "_calorias_de_hoy"), ("sensor", "_proxima_comida"), ("sensor", "_peso"), ("sensor", "_comidas_tomadas_hoy"),
         ("binary_sensor", "_mensajes_pendientes"), ("binary_sensor", "_cita_sin_confirmar"),
         ("calendar", "_comidas"), ("calendar", "_citas"), ("todo", "_lista_de_la_compra"),
@@ -29,7 +29,7 @@ def test_current_plan_is_the_one_of_this_week(ha, entry):
 
 
 def test_loose_food_is_named_estimated_and_not_swappable_as_a_plato(ha, entry):
-    meals = ha.state(ha.find("sensor", "_comidas_hoy"))["attributes"]["comidas"]
+    meals = ha.state(ha.find("sensor", "_comidas_de_hoy"))["attributes"]["comidas"]
     loose = next(p for m in meals for p in m["platos"] if p.get("tipo") == "alimento")
     assert loose["nombre"] == "Pollo, pechuga, solomillo (130 g)"
     assert loose["plato_id"] is None and loose["alimento_id"] == 4321
