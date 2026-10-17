@@ -40,6 +40,7 @@ http:
   server_port: {HA_PORT}
 frontend:
 config:
+repairs:
 logger:
   default: warning
   logs:
@@ -155,7 +156,7 @@ def ha(tmp_path_factory, fake) -> HA:
                    check=True, env=env, capture_output=True, timeout=300)
     log = config_dir / "ha_stdout.log"
     handle = open(log, "wb")
-    proc = subprocess.Popen([sys.executable, "-m", "homeassistant", "-c", str(config_dir)], env=env, stdout=handle, stderr=subprocess.STDOUT)
+    proc = subprocess.Popen([sys.executable, "-m", "homeassistant", "-c", str(config_dir), "--skip-pip"], env=env, stdout=handle, stderr=subprocess.STDOUT)
     instance = HA(config_dir, proc, log)
     try:
         deadline = time.time() + STARTUP_TIMEOUT
