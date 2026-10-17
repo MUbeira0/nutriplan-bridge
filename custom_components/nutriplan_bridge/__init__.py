@@ -218,6 +218,10 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
     resources = data.get("resources") if isinstance(data, dict) else getattr(data, "resources", None)
     mode = data.get("mode") if isinstance(data, dict) else getattr(data, "mode", None)
     if resources is None or mode != "storage" or not hasattr(resources, "async_create_item"):
+        _LOGGER.debug(
+            "Nutriplan Bridge: not registering a Lovelace resource (data=%s, mode=%r, resources=%s)",
+            type(data).__name__, mode, type(resources).__name__,
+        )
         return False
     try:
         await resources.async_get_info()  # loads the stored resources once
@@ -231,6 +235,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> bo
                 await resources.async_delete_item(item["id"])
         if not present:
             await resources.async_create_item({"res_type": "module", "url": url})
+        _LOGGER.debug("Nutriplan Bridge: card registered as Lovelace resource %s", url)
         return True
     except Exception:  # noqa: BLE001 - never break setup over a dashboard resource
         _LOGGER.exception("Nutriplan Bridge: could not register the card as a Lovelace resource")

@@ -111,6 +111,7 @@ def page(ha, entry):
                 info["errorCards"] = pg.locator("hui-error-card").all_inner_texts()
             except Exception as err:  # noqa: BLE001
                 info["errorCards"] = str(err)
+            info["lovelaceResources"] = ha.ws({"type": "lovelace/resources"})
             (ARTIFACTS / "failure.json").write_text(json.dumps({"info": info, "errors": pg.errors[-60:], "websocket": pg.ws_frames[:40]}, indent=2, ensure_ascii=False), encoding="utf-8")
             raise
         yield pg
