@@ -53,7 +53,7 @@ def page(ha, entry):
                     pass
             return " | ".join(parts)
 
-        pg.on("console", lambda m: pg.errors.append(describe(m)) if m.type in ("error", "warning") else None)
+        pg.on("console", lambda m: pg.errors.append(f"[{m.type}] " + describe(m)) if (m.type in ("error", "warning") or "nutriplan" in m.text.lower()) else None)
         pg.on("pageerror", lambda e: pg.errors.append(f"pageerror: {e}"))
         pg.on("response", lambda r: pg.errors.append(f"HTTP {r.status} {r.url}") if r.status >= 400 else None)
         pg.on("requestfailed", lambda r: pg.errors.append(f"requestfailed {r.url} {r.failure}"))

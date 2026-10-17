@@ -37,6 +37,7 @@
  */
 
 (() => {
+try {
 const MEAL_LABELS = {
   desayuno: "Desayuno",
   tentempie1: "Tentempié",
@@ -2198,5 +2199,12 @@ if (!window.customCards.some((c) => c.type === "nutriplan-bridge-card")) {
     documentationURL: "https://github.com/MUbeira0/nutriplan-bridge",
     description: "Plan actual y planes anteriores, comidas por día con siguiente comida, progreso de calorías, macros, lista de la compra, próxima cita y seguimiento del peso.",
   });
+}
+console.info("nutriplan-bridge-card: loaded");
+} catch (err) {
+  // A card that fails while loading shows up in Lovelace only as "Error de configuración";
+  // say what actually went wrong in the browser console.
+  console.error("nutriplan-bridge-card: failed to load", err && (err.stack || err.message || err));
+  throw err;
 }
 })();
