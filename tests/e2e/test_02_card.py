@@ -203,7 +203,9 @@ def test_chat_attachment_goes_through_the_upload_endpoint(page, fake, tmp_path):
     while time.time() < deadline and not fake.state.calls("POST", "/api/paciente/chat/images"):
         time.sleep(0.3)
     sent = fake.state.calls("POST", "/api/paciente/chat/images")
-    assert sent and sent[-1]["body"]["file"] == "comida.jpg"
+    status = page.locator("nutriplan-bridge-card .chat-panel .action-status").all_inner_texts()
+    assert sent, f"nothing reached DietoPro; card status={status}; browser={[e for e in page.errors if 'chat_upload' in e or 'HTTP' in e][-5:]}"
+    assert sent[-1]["body"]["file"] == "comida.jpg"
 
 
 def test_no_javascript_errors_from_the_card(page):
