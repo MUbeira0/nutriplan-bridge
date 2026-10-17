@@ -29,6 +29,12 @@ class _DietoProButton(CoordinatorEntity[DietoProDataUpdateCoordinator], ButtonEn
         self._attr_icon = icon
         self._attr_device_info = build_device_info(entry)
 
+    @property
+    def available(self) -> bool:
+        # CoordinatorEntity would mark these unavailable after a failed refresh - exactly
+        # when "refresh now" is needed. The sensors may go unavailable; the buttons never.
+        return True
+
 
 class RefreshButton(_DietoProButton):
     def __init__(self, coordinator, entry) -> None:

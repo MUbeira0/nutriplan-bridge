@@ -728,7 +728,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not _card_registered:
         try:
             www_dir = Path(__file__).parent / "www"
-            versioned = f"/nutriplan_bridge_files/v{_integration_version()}/nutriplan-bridge-card.js"
+            # Reading manifest.json is blocking I/O: do it in the executor, not in the event loop.
+            version = await hass.async_add_executor_job(_integration_version)
+            versioned = f"/nutriplan_bridge_files/v{version}/nutriplan-bridge-card.js"
             await hass.http.async_register_static_paths(
                 [
                     StaticPathConfig(CARD_URL_PATH, str(www_dir / "nutriplan-bridge-card.js"), False),
