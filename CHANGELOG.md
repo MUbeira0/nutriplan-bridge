@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.31.0
+- `medicion_abierta` y `registrar_medicion`: registrar una medición (opcional, manual; botón de la tarjeta solo con `show_measurement`).
+- `enviar_archivo_chat` y botón «Adjuntar foto o documento» en la tarjeta.
+- Los campos de la tarjeta aceptan coma o punto decimal. 127 tests.
+
 ## 0.30.0
 - Comidas tomadas guardadas en Home Assistant (sensor *Comidas tomadas hoy*, acción `marcar_comida`), compartidas entre dispositivos, con cumplimiento semanal e historial.
 - Avisos en Reparaciones (DietoPro no responde, formato de plan inesperado) y reautenticación real si caduca la contraseña.

@@ -46,6 +46,13 @@ Confirmed from the decompiled RTK Query API slice (+ live route/verb checks):
 - POST /api/paciente/citas/booking-request  body {"date", "time", "note"?}
 - POST /api/paciente/citas/{id}/confirm  and  /cancel  (no body)
   (all five traced from the app version 51.0.0 decompiled bundle)
+- GET   /api/paciente/seguimiento -> the body measurement the dietitian has OPEN
+  for you to fill in (the app's wizard starts here; the patient cannot create one)
+- PUT   /api/paciente/seguimientos/{id}/step  body {"<field>": value}, one call per
+  field: peso, porcentajeGrasa, porcentajeAgua, porcentajeMasaMagra, perimetroCintura,
+  perimetroCadera, perimetroPecho, perimetroPierna, perimetroBrazo
+- PATCH /api/paciente/finish/seguimiento -> closes the measurement (no body)
+- POST  /api/paciente/chat/images and /chat/documents  multipart: "text" + file "file"
 - "/api/paciente/pagos" was guessed from the useGetPagosQuery hook name but
   does not exist (verified live: 404), so payments are NOT implemented.
 
@@ -155,8 +162,11 @@ class DietoProApiClient:
         url = f"{BASE_URL}{path}"
         for attempt in range(2):
             headers = {"Authorization": f"Bearer {self._token}"}
+            attempt_kwargs = dict(kwargs)
+            if callable(attempt_kwargs.get("data")):
+                attempt_kwargs["data"] = attempt_kwargs["data"]()
             try:
-                async with self._session.request(method, url, headers=headers, **kwargs) as resp:
+                async with self._session.request(method, url, headers=headers, **attempt_kwargs) as resp:
                     if resp.status == 401 and attempt == 0:
                         if not await self._async_refresh():
                             await self.async_login()
@@ -347,3 +357,29 @@ class DietoProApiClient:
                 "dieta": dieta,
             },
         )
+
+    async def async_get_open_seguimiento(self) -> Any:
+        """The measurement currently open for the patient to fill in, or None."""
+        return await self._async_request("GET", "/api/paciente/seguimiento")
+
+    async def async_put_seguimiento_step(self, seguimiento_id: Any, field: str, value: Any) -> Any:
+        """Set one field of the open measurement (writes to your real account)."""
+        return await self._async_request(
+            "PUT", f"/api/paciente/seguimientos/{seguimiento_id}/step", json={field: value}
+        )
+
+    async def async_finish_seguimiento(self) -> Any:
+        return await self._async_request("PATCH", "/api/paciente/finish/seguimiento")
+
+    async def async_send_chat_file(
+        self, kind: str, filename: str, content: bytes, content_type: str | None, text: str = ""
+    ) -> Any:
+        """Send a photo ("images") or a document ("documents") to the dietitian's chat."""
+
+        def build() -> aiohttp.FormData:
+            form = aiohttp.FormData()
+            form.add_field("text", text)
+            form.add_field("file", content, filename=filename, content_type=content_type or "application/octet-stream")
+            return form
+
+        return await self._async_request("POST", f"/api/paciente/chat/{kind}", data=build)

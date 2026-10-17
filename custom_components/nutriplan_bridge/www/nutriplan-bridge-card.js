@@ -303,6 +303,8 @@ class NutriplanBridgeCard extends HTMLElement {
     this._chartOpen = false;
     this._numDietas = 0;
     this._chatDraft = "";
+    // Manual body measurement (opt-in: show_measurement). Never sent without a confirmation.
+    this._meas = { status: "idle", values: {}, msg: "" };
     this._chatStatus = "";
     this._book = { status: "idle", slots: [], selected: null, note: "", msg: "" };
     // Shopping list panel: { scope: "week"|"day", status, items, error, todoMsg }
@@ -603,6 +605,15 @@ class NutriplanBridgeCard extends HTMLElement {
           border: 1px solid var(--divider-color, rgba(127,127,127,.4)); border-radius: 8px; padding: 6px 8px;
         }
         .book-note { width: 100%; margin: 6px 0; }
+        .meas-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
+        .meas-grid label { display: flex; flex-direction: column; font-size: 0.78em; color: var(--secondary-text-color); }
+        .meas-input {
+          font: inherit; font-size: 1.05em; margin-top: 2px; box-sizing: border-box; width: 100%;
+          color: var(--primary-text-color); background: var(--card-background-color, #fff);
+          border: 1px solid var(--divider-color, rgba(127,127,127,.4)); border-radius: 8px; padding: 6px 8px;
+        }
+        .chat-attach { cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+        .chat-attach ha-icon { --mdc-icon-size: 16px; }
         .alimento-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
         .alimento-row + .alimento-row { border-top: 1px solid var(--divider-color, rgba(127,127,127,.2)); }
         .appt-actions { margin-top: 8px; }
@@ -671,6 +682,7 @@ class NutriplanBridgeCard extends HTMLElement {
     this.shadowRoot.addEventListener("input", (ev) => {
       if (ev.target.classList && ev.target.classList.contains("chat-input")) this._chatDraft = ev.target.value;
       if (ev.target.classList && ev.target.classList.contains("book-note")) this._book.note = ev.target.value;
+      if (ev.target.classList && ev.target.classList.contains("meas-input")) this._meas.values[ev.target.dataset.field] = ev.target.value;
     });
     // Swipe left/right over the meal list to move to the next/previous day.
     let sx = null;
@@ -756,6 +768,13 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleChange(ev) {
+    const fileInput = ev.target.closest && ev.target.closest(".chat-file");
+    if (fileInput) {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = "";
+      this._uploadChatFile(file);
+      return;
+    }
     const box = ev.target.closest && ev.target.closest(".shop-check");
     if (!box) return;
     const key = this._shopStorageKey();
@@ -909,6 +928,72 @@ class NutriplanBridgeCard extends HTMLElement {
     this._safeRender();
   }
 
+  async _uploadChatFile(file) {
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      this._chatStatus = "El archivo supera los 15 MB.";
+      this._safeRender();
+      return;
+    }
+    this._chatStatus = `Enviando ${file.name}…`;
+    this._safeRender();
+    try {
+      const auth = this._hass.auth;
+      if (auth && auth.expired && auth.refreshAccessToken) await auth.refreshAccessToken();
+      const token = auth && (auth.accessToken || (auth.data && auth.data.access_token));
+      const form = new FormData();
+      form.append("text", (this._chatDraft || "").trim());
+      if (this._configEntryId) form.append("config_entry_id", this._configEntryId);
+      form.append("file", file, file.name);
+      const url = this._hass.hassUrl ? this._hass.hassUrl("/api/nutriplan_bridge/chat_upload") : "/api/nutriplan_bridge/chat_upload";
+      const res = await fetch(url, { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message || `Error ${res.status}`);
+      this._chatDraft = "";
+      this._chatStatus = `Enviado: ${file.name}`;
+    } catch (err) {
+      this._chatStatus = err.message || "No se pudo enviar el archivo.";
+    }
+    this._safeRender();
+  }
+
+  async _openMeasurement() {
+    this._meas = { status: "loading", values: {}, msg: "" };
+    this._safeRender();
+    try {
+      const res = await this._callService("medicion_abierta", this._withAccount({}), true);
+      this._meas = res && res.abierta
+        ? { status: "form", values: {}, msg: "" }
+        : { status: "none", values: {}, msg: "No hay ninguna medición abierta: tu dietista tiene que abrirla en DietoPro." };
+    } catch (err) {
+      this._meas = { status: "none", values: {}, msg: err.message || String(err) };
+    }
+    this._safeRender();
+  }
+
+  async _sendMeasurement() {
+    const entries = Object.entries(this._meas.values)
+      .map(([k, v]) => [k, Number(String(v).replace(",", "."))])
+      .filter(([, v]) => Number.isFinite(v) && v > 0);
+    if (!entries.length) {
+      this._meas = { ...this._meas, msg: "Escribe al menos un valor." };
+      this._safeRender();
+      return;
+    }
+    const labels = { peso: "peso", porcentaje_grasa: "% grasa", perimetro_cintura: "cintura", perimetro_cadera: "cadera" };
+    const summary = entries.map(([k, v]) => `${labels[k] || k} ${v}`).join(", ");
+    if (!window.confirm(`¿Enviar a tu dietista (${summary}) y cerrar la medición? Se escribe en tu cuenta real de DietoPro.`)) return;
+    this._meas = { ...this._meas, status: "sending", msg: "" };
+    this._safeRender();
+    try {
+      await this._callService("registrar_medicion", this._withAccount({ ...Object.fromEntries(entries), finalizar: true }), true);
+      this._meas = { status: "done", values: {}, msg: "Medición enviada." };
+    } catch (err) {
+      this._meas = { status: "form", values: this._meas.values, msg: err.message || String(err) };
+    }
+    this._safeRender();
+  }
+
   async _markChatRead() {
     try {
       await this._callService("marcar_chat_leido", this._withAccount({}));
@@ -1047,6 +1132,19 @@ class NutriplanBridgeCard extends HTMLElement {
   }
 
   _handleClick(ev) {
+    if (ev.target.closest(".meas-open")) {
+      this._openMeasurement();
+      return;
+    }
+    if (ev.target.closest(".meas-close")) {
+      this._meas = { status: "idle", values: {}, msg: "" };
+      this._safeRender();
+      return;
+    }
+    if (ev.target.closest(".meas-send")) {
+      this._sendMeasurement();
+      return;
+    }
     if (ev.target.closest(".chat-send")) {
       this._sendChat();
       return;
@@ -1804,6 +1902,34 @@ class NutriplanBridgeCard extends HTMLElement {
 
     const unread = chatEntity ? Number(chatEntity.state) || 0 : 0;
 
+    let measHtml = "";
+    if (cfg.show_measurement === true) {
+      const m = this._meas;
+      const fields = [
+        ["peso", "Peso (kg)"],
+        ["porcentaje_grasa", "Grasa (%)"],
+        ["perimetro_cintura", "Cintura (cm)"],
+        ["perimetro_cadera", "Cadera (cm)"],
+      ];
+      if (m.status === "loading") measHtml = '<div class="action-status">Comprobando si hay una medición abierta…</div>';
+      else if (m.status === "sending") measHtml = '<div class="action-status">Enviando…</div>';
+      else if (m.status === "form") {
+        measHtml = `<div class="meas-grid">${fields
+          .map(
+            ([k, label]) =>
+              `<label>${label}<input class="meas-input" data-field="${k}" type="text" inputmode="decimal" autocomplete="off" placeholder="0,0" value="${escapeHtml(m.values[k] ?? "")}" /></label>`
+          )
+          .join("")}</div><button class="cambiar-btn meas-send">Enviar y cerrar</button><button class="action-btn meas-close">Cancelar</button>${
+          m.msg ? `<div class="action-status error">${escapeHtml(m.msg)}</div>` : ""
+        }`;
+      } else {
+        measHtml = `<button class="action-btn meas-open"><ha-icon icon="mdi:scale-bathroom"></ha-icon> Registrar medición</button>${
+          m.msg ? `<div class="action-status${m.status === "none" ? " error" : ""}">${escapeHtml(m.msg)}</div>` : ""
+        }`;
+      }
+      measHtml = `<div class="appt-actions">${measHtml}</div>`;
+    }
+
     let contactHtml = "";
     if (cfg.hide_contact !== true) {
       if (dietistaAttrs.telefono) {
@@ -1832,7 +1958,7 @@ class NutriplanBridgeCard extends HTMLElement {
           ? ""
           : `<div class="chat-compose"><textarea class="chat-input" rows="2" placeholder="Escribe a tu dietista…">${escapeHtml(
               this._chatDraft
-            )}</textarea><button class="action-btn chat-send">Enviar</button></div>${
+            )}</textarea><button class="action-btn chat-send">Enviar</button></div><label class="action-btn chat-attach"><ha-icon icon="mdi:paperclip"></ha-icon>Adjuntar foto o documento<input type="file" class="chat-file" hidden accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" /></label>${
               this._chatStatus ? `<div class="action-status">${escapeHtml(this._chatStatus)}</div>` : ""
             }`;
       chatHtml = `<div class="chat-panel">${
@@ -1959,6 +2085,7 @@ class NutriplanBridgeCard extends HTMLElement {
           ? `<div class="section">
               <div class="section-title"><ha-icon icon="mdi:chart-line"></ha-icon>Último seguimiento</div>
               ${metricsHtml}
+              ${measHtml}
             </div>`
           : ""
       }
@@ -1993,6 +2120,7 @@ const EDITOR_SCHEMA = [
   { name: "hide_contact", label: "Ocultar botones de llamar/escribir al dietista", selector: { boolean: {} } },
   { name: "hide_chat", label: "Ocultar el icono de mensajes (si no hay mensajes sin leer)", selector: { boolean: {} } },
   { name: "hide_chat_compose", label: "Ocultar la caja para escribir al dietista", selector: { boolean: {} } },
+  { name: "show_measurement", label: "Mostrar «Registrar medición» (manual, escribe en tu cuenta)", selector: { boolean: {} } },
   { name: "hide_booking", label: "Ocultar pedir/confirmar/cancelar cita", selector: { boolean: {} } },
   { name: "hide_charlas", label: "Ocultar charlas", selector: { boolean: {} } },
   { name: "hide_images", label: "Ocultar fotos de los platos", selector: { boolean: {} } },

@@ -1512,3 +1512,14 @@ class DietoProEatenSensor(DietoProTodayMealsSensor):
             "planificadas_semana": week_planned,
             "historial": historial,
         }
+
+
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif")
+MAX_CHAT_FILE_BYTES = 15 * 1024 * 1024
+
+
+def chat_file_kind(filename: str, content_type: str | None = None) -> str:
+    """"images" or "documents": the chat has a separate endpoint for each."""
+    if (content_type or "").startswith("image/") or filename.lower().endswith(IMAGE_EXTENSIONS):
+        return "images"
+    return "documents"

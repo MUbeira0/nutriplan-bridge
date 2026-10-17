@@ -4,12 +4,14 @@ from __future__ import annotations
 import json
 import logging
 from datetime import timedelta
+from http import HTTPStatus
 from pathlib import Path
 
 import voluptuous as vol
+from aiohttp import web
 
 from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import KEY_HASS, HomeAssistantView, StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
@@ -23,7 +25,7 @@ from .api import DietoProApiClient, DietoProApiError, DietoProAuthError
 from .const import CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, DOMAIN, PLATFORMS
 from .coordinator import DietoProDataUpdateCoordinator, plan_start_date
 from .eaten import EatenStore
-from .sensor import MEAL_SLOT_KEYS, _plato_detail, normalize_slots, shape_day, shopping_list
+from .sensor import MAX_CHAT_FILE_BYTES, MEAL_SLOT_KEYS, chat_file_kind, _plato_detail, normalize_slots, shape_day, shopping_list
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +36,22 @@ SERVICE_RATE_DISH = "valorar_plato"
 SERVICE_PLATO_OPTIONS = "opciones_plato"
 SERVICE_CHANGE_PLATO = "cambiar_plato"
 SERVICE_MARK_EATEN = "marcar_comida"
+SERVICE_OPEN_MEASUREMENT = "medicion_abierta"
+SERVICE_REGISTER_MEASUREMENT = "registrar_medicion"
+SERVICE_CHAT_FILE = "enviar_archivo_chat"
+
+# service field -> field name expected by DietoPro, in the order the app's wizard asks for them
+MEASUREMENT_FIELDS = (
+    ("peso", "peso", 20, 400),
+    ("porcentaje_grasa", "porcentajeGrasa", 1, 80),
+    ("porcentaje_agua", "porcentajeAgua", 1, 90),
+    ("porcentaje_masa_magra", "porcentajeMasaMagra", 1, 99),
+    ("perimetro_cintura", "perimetroCintura", 20, 300),
+    ("perimetro_cadera", "perimetroCadera", 20, 300),
+    ("perimetro_pecho", "perimetroPecho", 20, 300),
+    ("perimetro_pierna", "perimetroPierna", 10, 200),
+    ("perimetro_brazo", "perimetroBrazo", 5, 100),
+)
 SERVICE_ALIMENTO_OPTIONS = "opciones_alimento"
 SERVICE_CHANGE_ALIMENTO = "cambiar_alimento"
 SERVICE_GET_MEALS = "obtener_comidas"
@@ -129,6 +147,18 @@ MARK_EATEN_SCHEMA = vol.Schema(
         vol.Optional("tomada", default=True): cv.boolean,
         vol.Optional("fecha"): cv.date,
     }
+)
+
+REGISTER_MEASUREMENT_SCHEMA = vol.Schema(
+    {
+        **_ENTRY_SCHEMA,
+        **{vol.Optional(key): vol.Coerce(float) for key, _api, _lo, _hi in MEASUREMENT_FIELDS},
+        vol.Optional("finalizar", default=True): cv.boolean,
+    }
+)
+
+CHAT_FILE_SCHEMA = vol.Schema(
+    {**_ENTRY_SCHEMA, vol.Required("ruta"): cv.string, vol.Optional("texto", default=""): cv.string}
 )
 
 CHANGE_PLATO_SCHEMA = vol.Schema(
@@ -360,6 +390,143 @@ async def _async_handle_mark_eaten(hass: HomeAssistant, call: ServiceCall) -> No
     if franja not in MEAL_SLOT_KEYS:
         raise HomeAssistantError(f'Franja desconocida: "{franja}". Usa una de: {", ".join(MEAL_SLOT_KEYS)}.')
     coordinator.eaten.mark(call.data.get("fecha") or dt_util.now().date(), franja, call.data["tomada"])
+
+
+def _open_measurement_id(raw: object) -> object | None:
+    """The id of the open measurement out of GET /seguimiento (plain object, or wrapped)."""
+    if isinstance(raw, dict):
+        inner = raw.get("seguimiento")
+        if isinstance(inner, dict):
+            raw = inner
+        return raw.get("id")
+    return None
+
+
+async def _async_handle_open_measurement(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Read-only: is there a measurement open for you to fill in?"""
+    coordinator = _resolve_coordinator(hass, call)
+    try:
+        raw = await coordinator.client.async_get_open_seguimiento()
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("consultar la medición abierta", err) from err
+    return {"abierta": _open_measurement_id(raw) is not None, "id": _open_measurement_id(raw), "raw": raw}
+
+
+async def _async_handle_register_measurement(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Fill in the measurement your dietitian opened (manual; writes to your real account)."""
+    coordinator = _resolve_coordinator(hass, call)
+    values: list[tuple[str, str, float]] = []
+    for key, api_name, low, high in MEASUREMENT_FIELDS:
+        if key in call.data:
+            value = call.data[key]
+            if not low <= value <= high:
+                raise HomeAssistantError(f'"{key}" debe estar entre {low} y {high} (recibido {value}).')
+            values.append((key, api_name, round(value, 2)))
+    if not values:
+        raise HomeAssistantError("Indica al menos un valor (peso, porcentaje_grasa, perimetro_cintura...).")
+
+    try:
+        seguimiento_id = _open_measurement_id(await coordinator.client.async_get_open_seguimiento())
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("consultar la medición abierta", err) from err
+    if seguimiento_id is None:
+        raise HomeAssistantError(
+            "No hay ninguna medición abierta. Tu dietista tiene que abrirla en DietoPro; "
+            "esta integración no puede crearla."
+        )
+
+    sent: dict[str, float] = {}
+    for key, api_name, value in values:
+        try:
+            await coordinator.client.async_put_seguimiento_step(seguimiento_id, api_name, value)
+        except (DietoProApiError, DietoProAuthError) as err:
+            done = ", ".join(sent) or "ninguno"
+            raise HomeAssistantError(
+                f"Se detuvo al enviar {key}. Ya enviados: {done}. Revisa el registro de Home Assistant."
+            ) from err
+        sent[key] = value
+
+    finished = False
+    if call.data["finalizar"]:
+        try:
+            await coordinator.client.async_finish_seguimiento()
+            finished = True
+        except (DietoProApiError, DietoProAuthError) as err:
+            raise HomeAssistantError(
+                "Los valores se enviaron pero no se pudo cerrar la medición; ciérrala desde la app de DietoPro."
+            ) from err
+    await coordinator.async_request_refresh()
+    return {"id": seguimiento_id, "enviados": sent, "finalizada": finished}
+
+
+async def _async_send_chat_file(hass: HomeAssistant, coordinator: DietoProDataUpdateCoordinator, filename: str, content: bytes, content_type: str | None, text: str) -> str:
+    if not content:
+        raise HomeAssistantError("El archivo está vacío.")
+    if len(content) > MAX_CHAT_FILE_BYTES:
+        raise HomeAssistantError(f"El archivo supera el máximo de {MAX_CHAT_FILE_BYTES // (1024 * 1024)} MB.")
+    kind = chat_file_kind(filename, content_type)
+    try:
+        await coordinator.client.async_send_chat_file(kind, filename, content, content_type, text)
+    except (DietoProApiError, DietoProAuthError) as err:
+        raise _friendly_error("enviar el archivo al chat", err) from err
+    await coordinator.async_request_refresh()
+    return kind
+
+
+async def _async_handle_chat_file(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
+    """Send a photo/document that lives on the Home Assistant machine to the dietitian."""
+    coordinator = _resolve_coordinator(hass, call)
+    path = Path(call.data["ruta"])
+    if not hass.config.is_allowed_path(str(path)):
+        raise HomeAssistantError(
+            "Esa ruta no está permitida. Añádela en allowlist_external_dirs o usa /config o /media."
+        )
+    try:
+        content = await hass.async_add_executor_job(path.read_bytes)
+    except OSError as err:
+        raise HomeAssistantError(f"No se pudo leer el archivo: {err}") from err
+    kind = await _async_send_chat_file(hass, coordinator, path.name, content, None, call.data["texto"])
+    return {"enviado": path.name, "tipo": kind}
+
+
+class ChatUploadView(HomeAssistantView):
+    """Used by the card's attach button: the browser posts the file here and it is
+    forwarded to DietoPro. Administrators only."""
+
+    url = "/api/nutriplan_bridge/chat_upload"
+    name = "api:nutriplan_bridge:chat_upload"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app[KEY_HASS]
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            return self.json_message("Solo administradores", HTTPStatus.FORBIDDEN)
+        fields: dict[str, str] = {}
+        upload: tuple[str, str | None, bytes] | None = None
+        reader = await request.multipart()
+        while (part := await reader.next()) is not None:
+            if part.name == "file":
+                content = bytearray()
+                while chunk := await part.read_chunk(64 * 1024):
+                    content.extend(chunk)
+                    if len(content) > MAX_CHAT_FILE_BYTES:
+                        return self.json_message("Archivo demasiado grande", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+                upload = (part.filename or "archivo", part.headers.get("Content-Type"), bytes(content))
+            elif part.name:
+                fields[part.name] = (await part.text())[:2000]
+        if upload is None:
+            return self.json_message("Falta el archivo", HTTPStatus.BAD_REQUEST)
+
+        class _Call:
+            data = {"config_entry_id": fields["config_entry_id"]} if fields.get("config_entry_id") else {}
+
+        try:
+            coordinator = _resolve_coordinator(hass, _Call())
+            kind = await _async_send_chat_file(hass, coordinator, upload[0], upload[2], upload[1], fields.get("text", ""))
+        except HomeAssistantError as err:
+            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+        return self.json({"ok": True, "tipo": kind})
 
 
 async def _async_handle_plato_options(hass: HomeAssistant, call: ServiceCall) -> ServiceResponse:
@@ -618,6 +785,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async def _change_alimento(call: ServiceCall) -> ServiceResponse:
             return await _async_handle_change_alimento(hass, call)
 
+        async def _open_measurement(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_open_measurement(hass, call)
+
+        async def _register_measurement(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_register_measurement(hass, call)
+
+        async def _chat_file(call: ServiceCall) -> ServiceResponse:
+            return await _async_handle_chat_file(hass, call)
+
         async def _mark_eaten(call: ServiceCall) -> None:
             await _async_handle_mark_eaten(hass, call)
 
@@ -657,6 +833,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             DOMAIN, SERVICE_CANCEL_CITA, _cancel_cita, schema=CITA_ID_SCHEMA, supports_response=SupportsResponse.ONLY
         )
         hass.services.async_register(DOMAIN, SERVICE_MARK_EATEN, _mark_eaten, schema=MARK_EATEN_SCHEMA)
+        hass.services.async_register(
+            DOMAIN, SERVICE_OPEN_MEASUREMENT, _open_measurement, schema=MARK_CHAT_READ_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_REGISTER_MEASUREMENT, _register_measurement, schema=REGISTER_MEASUREMENT_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.services.async_register(
+            DOMAIN, SERVICE_CHAT_FILE, _chat_file, schema=CHAT_FILE_SCHEMA, supports_response=SupportsResponse.ONLY
+        )
+        hass.http.register_view(ChatUploadView())
         hass.services.async_register(
             DOMAIN,
             SERVICE_SHOPPING,

@@ -41,6 +41,15 @@
     },
     "marcar_comida": {
       "service": "mdi:check-circle"
+    },
+    "medicion_abierta": {
+      "service": "mdi:clipboard-search-outline"
+    },
+    "registrar_medicion": {
+      "service": "mdi:scale-bathroom"
+    },
+    "enviar_archivo_chat": {
+      "service": "mdi:paperclip"
     }
   }
 }

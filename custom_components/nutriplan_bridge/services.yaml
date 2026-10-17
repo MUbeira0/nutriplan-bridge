@@ -468,3 +468,175 @@ marcar_comida:
       required: false
       selector:
         date:
+
+medicion_abierta:
+  name: Ver si hay una medición abierta
+  description: >-
+    Solo lectura. Indica si tu dietista tiene abierta una medición para que la
+    rellenes (la app de DietoPro la pide por pasos). Úsala antes de
+    "registrar_medicion".
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+
+registrar_medicion:
+  name: Registrar medición
+  description: >-
+    Manual y opcional. Rellena la medición que tu dietista tiene abierta con
+    los valores que indiques y, por defecto, la cierra. IMPORTANTE: escribe en
+    tu cuenta real y el dietista lo ve. No puede crear una medición nueva: debe
+    estar abierta en DietoPro.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    peso:
+      name: Peso
+      description: Peso en kg.
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 400
+          step: 0.1
+          unit_of_measurement: "kg"
+          mode: box
+    porcentaje_grasa:
+      name: Grasa corporal
+      description: Porcentaje de grasa.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 80
+          step: 0.1
+          unit_of_measurement: "%"
+          mode: box
+    porcentaje_agua:
+      name: Agua corporal
+      description: Porcentaje de agua.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 90
+          step: 0.1
+          unit_of_measurement: "%"
+          mode: box
+    porcentaje_masa_magra:
+      name: Masa magra
+      description: Porcentaje de masa magra.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 99
+          step: 0.1
+          unit_of_measurement: "%"
+          mode: box
+    perimetro_cintura:
+      name: Cintura
+      description: Perímetro en cm.
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 0.1
+          unit_of_measurement: "cm"
+          mode: box
+    perimetro_cadera:
+      name: Cadera
+      description: Perímetro en cm.
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 0.1
+          unit_of_measurement: "cm"
+          mode: box
+    perimetro_pecho:
+      name: Pecho
+      description: Perímetro en cm.
+      required: false
+      selector:
+        number:
+          min: 20
+          max: 300
+          step: 0.1
+          unit_of_measurement: "cm"
+          mode: box
+    perimetro_pierna:
+      name: Pierna
+      description: Perímetro en cm.
+      required: false
+      selector:
+        number:
+          min: 10
+          max: 200
+          step: 0.1
+          unit_of_measurement: "cm"
+          mode: box
+    perimetro_brazo:
+      name: Brazo
+      description: Perímetro en cm.
+      required: false
+      selector:
+        number:
+          min: 5
+          max: 100
+          step: 0.1
+          unit_of_measurement: "cm"
+          mode: box
+    finalizar:
+      name: Cerrar la medición
+      description: >-
+        Si lo desactivas solo se guardan los valores y la cierras tú desde la
+        app oficial.
+      required: false
+      default: true
+      selector:
+        boolean:
+
+enviar_archivo_chat:
+  name: Enviar foto o documento al chat
+  description: >-
+    Envía a tu dietista un archivo que esté en la máquina de Home Assistant
+    (foto: jpg, png, heic...; documento: pdf...). Máximo 15 MB. IMPORTANTE:
+    tu dietista lo verá.
+  fields:
+    config_entry_id:
+      name: Cuenta
+      description: >-
+        Solo necesario si tienes más de una cuenta de Nutriplan Bridge
+        configurada.
+      required: false
+      selector:
+        config_entry:
+          integration: nutriplan_bridge
+    ruta:
+      name: Ruta del archivo
+      description: Por ejemplo /config/www/comida.jpg o /media/analitica.pdf.
+      required: true
+      selector:
+        text:
+    texto:
+      name: Mensaje
+      description: Texto opcional que acompaña al archivo.
+      required: false
+      selector:
+        text:

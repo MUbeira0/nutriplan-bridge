@@ -159,6 +159,25 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
 
+## Novedades 0.31
+
+Contratos sacados de la app oficial v51. **Estas acciones escriben en tu cuenta
+real** y no se han podido probar contra una; compruébalas la primera vez en la
+app oficial.
+
+- **Registrar medición (opcional y manual).** En DietoPro es tu dietista quien
+  *abre* una medición y tú la rellenas por pasos; esta integración no puede
+  crearla. Acciones: `medicion_abierta` (solo lectura: ¿hay una abierta?) y
+  `registrar_medicion` (peso, % grasa, % agua, % masa magra y perímetros de
+  cintura, cadera, pecho, pierna y brazo; `finalizar` la cierra, por defecto sí).
+  No hay ninguna automatización ni sincronización con básculas: solo se envía
+  cuando tú la llamas. En la tarjeta el botón **no aparece** salvo que actives
+  `show_measurement` en su editor; pide confirmación antes de enviar.
+- **Fotos y documentos al chat.** Acción `enviar_archivo_chat` (ruta de un
+  archivo de la máquina de Home Assistant, máx. 15 MB; solo rutas permitidas
+  como `/config` o `/media`) y botón **Adjuntar foto o documento** en el panel
+  de mensajes de la tarjeta (solo administradores).
+
 ## Novedades 0.30
 
 - **Comidas tomadas, compartidas entre dispositivos.** Antes las marcas se
