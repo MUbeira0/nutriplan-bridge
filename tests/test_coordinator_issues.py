@@ -22,7 +22,11 @@ def make(client_behaviour):
     client = MagicMock()
     for name in CLIENT_CALLS:
         setattr(client, name, AsyncMock(**client_behaviour(name)))
-    c = coord_mod.DietoProDataUpdateCoordinator(MagicMock(), client, 15, "abc")
+    # Built without __init__: recent Home Assistant versions insist on a fully set-up
+    # core (frame helper, config entry context) just to construct a coordinator, and
+    # these tests only exercise _async_update_data's own logic.
+    c = object.__new__(coord_mod.DietoProDataUpdateCoordinator)
+    c.client, c.hass, c._entry_id, c._failures, c.eaten, c.data = client, MagicMock(), "abc", 0, None, None
     return c
 
 
