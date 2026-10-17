@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -80,9 +80,12 @@ class AppointmentSoonBinary(_DietoProBinary):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self.async_on_remove(
-            async_track_time_interval(self.hass, lambda _now: self.async_write_ha_state(), timedelta(minutes=5))
-        )
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=5)))
+
+    @callback
+    def _async_tick(self, _now) -> None:
+        # @callback keeps it on the event loop (a lambda would run in a thread).
+        self.async_write_ha_state()
 
     def _when(self):
         wrapper = self._data.get("cita")

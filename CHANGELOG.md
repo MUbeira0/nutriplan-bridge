@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.29.1
+- Corrige el error «async_write_ha_state from a thread» que aparecía cada minuto (sensor Próxima comida) y cada 5 minutos (binary sensor Cita en 24 h): el refresco periódico era un `lambda`, que Home Assistant ejecuta en un hilo aparte; ahora es un `@callback` en el bucle de eventos. Desde la 0.23.0.
+- Test que impide volver a pasar un `lambda` a los temporizadores de Home Assistant. 93 tests.
+
 ## 0.29.0
 - Cambiar alimentos sueltos: acciones `opciones_alimento` y `cambiar_alimento` y botón «Cambiar alimento» en la tarjeta (contratos de la app oficial v51).
 - Alimentos sueltos sin hueco de imagen ni «No requiere preparación». `opciones_plato` rechaza IDs vacíos con un mensaje claro.

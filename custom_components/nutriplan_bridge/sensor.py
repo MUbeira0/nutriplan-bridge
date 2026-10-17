@@ -21,7 +21,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, UnitOfMass
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -1187,9 +1187,14 @@ class DietoProNextMealSensor(DietoProTodayMealsSensor):
         await super().async_added_to_hass()
         # "Next" depends on the clock, not only on data: re-evaluate every
         # minute instead of waiting for the next (15 min) poll.
-        self.async_on_remove(
-            async_track_time_interval(self.hass, lambda _now: self.async_write_ha_state(), timedelta(minutes=1))
-        )
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
+
+    @callback
+    def _async_tick(self, _now) -> None:
+        # Must be a @callback: HA runs a plain function/lambda in a worker thread,
+        # and async_write_ha_state() is not allowed from a thread (it raised
+        # "calls async_write_ha_state from a thread" every minute).
+        self.async_write_ha_state()
 
     @property
     def entity_picture(self) -> None:
