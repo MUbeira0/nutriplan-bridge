@@ -1,4 +1,5 @@
 """Constants for the Nutriplan Bridge integration."""
+import os
 
 DOMAIN = "nutriplan_bridge"
 
@@ -16,7 +17,9 @@ DOMAIN = "nutriplan_bridge"
 # - GET  /api/paciente/cita         -> {"cita": {...} | null}
 # - GET  /api/paciente/seguimientos -> body-composition tracking entries
 # - GET  /api/paciente/dietista     -> assigned dietitian
-BASE_URL = "https://dietopro.com"
+# The override exists only so the end-to-end tests can point the integration at a fake
+# server; normal installs always talk to dietopro.com.
+BASE_URL = os.environ.get("NUTRIPLAN_BRIDGE_BASE_URL", "https://dietopro.com").rstrip("/")
 
 CONF_UPDATE_INTERVAL = "update_interval"
 DEFAULT_UPDATE_INTERVAL = 15  # minutes

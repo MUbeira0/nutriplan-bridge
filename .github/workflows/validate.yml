@@ -41,3 +41,30 @@ jobs:
         with:
           category: integration
           ignore: brands
+
+  e2e:
+    name: End to end (real Home Assistant + browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: |
+          pip install homeassistant pytest playwright requests aiohttp
+          playwright install --with-deps chromium
+      - name: Run
+        run: python -m pytest tests/e2e -o addopts="" -v -x -p no:cacheprovider
+      - name: Home Assistant log tail
+        if: failure()
+        run: tail -n 200 e2e-artifacts/ha_stdout.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-artifacts
+          path: e2e-artifacts
+          if-no-files-found: ignore
