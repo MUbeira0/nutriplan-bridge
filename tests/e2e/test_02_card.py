@@ -85,6 +85,17 @@ def page(ha, entry):
                     };
                 }"""
             )
+            import requests
+
+            index = requests.get(f"{BASE}/nutriplan-e2e/nutri", timeout=20).text
+            info["indexMentionsCardScript"] = "nutriplan_bridge_files" in index
+            info["indexSnippet"] = index[max(0, index.find("nutriplan_bridge_files") - 200): index.find("nutriplan_bridge_files") + 200] if info["indexMentionsCardScript"] else index[:600]
+            for path in ("/nutriplan_bridge_files/nutriplan-bridge-card.js",):
+                info[f"GET {path}"] = requests.get(f"{BASE}{path}", timeout=20).status_code
+            try:
+                info["errorCards"] = pg.locator("hui-error-card").all_inner_texts()
+            except Exception as err:  # noqa: BLE001
+                info["errorCards"] = str(err)
             (ARTIFACTS / "failure.json").write_text(json.dumps({"info": info, "errors": pg.errors[-60:], "websocket": pg.ws_frames[:40]}, indent=2, ensure_ascii=False), encoding="utf-8")
             raise
         yield pg
