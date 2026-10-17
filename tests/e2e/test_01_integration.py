@@ -140,7 +140,7 @@ def test_rejected_credentials_open_the_reauth_flow(ha, entry, fake):
     press()
 
     def reauth_started():
-        flows = ha.api("GET", "/api/config/config_entries/flow").json()
+        flows = ha.ws({"type": "config_entries/flow/progress"}).get("result") or []
         return [f for f in flows if f["handler"] == "nutriplan_bridge" and f["context"].get("source") == "reauth"]
 
     flow = ha.wait_for(reauth_started, timeout=60, what="the reauth flow")[0]
