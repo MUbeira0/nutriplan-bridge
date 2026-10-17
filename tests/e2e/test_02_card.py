@@ -90,8 +90,15 @@ def page(ha, entry):
             index = requests.get(f"{BASE}/nutriplan-e2e/nutri", timeout=20).text
             info["indexMentionsCardScript"] = "nutriplan_bridge_files" in index
             info["indexSnippet"] = index[max(0, index.find("nutriplan_bridge_files") - 200): index.find("nutriplan_bridge_files") + 200] if info["indexMentionsCardScript"] else index[:600]
-            for path in ("/nutriplan_bridge_files/nutriplan-bridge-card.js",):
-                info[f"GET {path}"] = requests.get(f"{BASE}{path}", timeout=20).status_code
+            import re as _re
+
+            versioned = _re.search(r'import\("(/nutriplan_bridge_files/[^"]+)"\)', index)
+            for path in ("/nutriplan_bridge_files/nutriplan-bridge-card.js", versioned.group(1) if versioned else None):
+                if path:
+                    r = requests.get(f"{BASE}{path}", timeout=20)
+                    info[f"GET {path}"] = [r.status_code, r.headers.get("content-type"), len(r.content)]
+                    info["dynamicImport"] = pg.evaluate("(p) => import(p).then(() => 'ok', (e) => String(e && e.stack || e))", path)
+                    info["definedAfterImport"] = pg.evaluate("!!customElements.get('nutriplan-bridge-card')")
             try:
                 info["errorCards"] = pg.locator("hui-error-card").all_inner_texts()
             except Exception as err:  # noqa: BLE001
