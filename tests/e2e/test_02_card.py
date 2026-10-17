@@ -37,8 +37,22 @@ def page(ha, entry):
         pg = context.new_page()
         pg.set_default_timeout(60000)
         pg.errors = []
-        pg.on("console", lambda m: pg.errors.append(m.text) if m.type == "error" else None)
-        pg.on("pageerror", lambda e: pg.errors.append(str(e)))
+        pg.frames = []
+
+        def describe(msg):
+            parts = [msg.text]
+            for arg in msg.args:
+                try:
+                    parts.append(json.dumps(arg.json_value(), default=str)[:400])
+                except Exception:  # noqa: BLE001 - non-serialisable handle
+                    pass
+            return " | ".join(parts)
+
+        pg.on("console", lambda m: pg.errors.append(describe(m)) if m.type in ("error", "warning") else None)
+        pg.on("pageerror", lambda e: pg.errors.append(f"pageerror: {e}"))
+        pg.on("response", lambda r: pg.errors.append(f"HTTP {r.status} {r.url}") if r.status >= 400 else None)
+        pg.on("requestfailed", lambda r: pg.errors.append(f"requestfailed {r.url} {r.failure}"))
+        pg.on("websocket", lambda ws: (ws.on("framesent", lambda f: pg.frames.append(("sent", str(f)[:300]))), ws.on("framereceived", lambda f: pg.frames.append(("recv", str(f)[:300])))))
         pg.on("dialog", lambda d: d.accept())  # the card asks window.confirm() before writing to the account
         pg.goto(f"{BASE}/lovelace/nutri")
         try:
@@ -66,7 +80,7 @@ def page(ha, entry):
                     };
                 }"""
             )
-            (ARTIFACTS / "failure.json").write_text(json.dumps({"info": info, "errors": pg.errors[-40:]}, indent=2, ensure_ascii=False), encoding="utf-8")
+            (ARTIFACTS / "failure.json").write_text(json.dumps({"info": info, "errors": pg.errors[-60:], "websocket": pg.frames[:40]}, indent=2, ensure_ascii=False), encoding="utf-8")
             raise
         yield pg
         pg.screenshot(path=str(ARTIFACTS / "final.png"), full_page=True)
