@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.32.0
+Esta versión sale de probar la integración y la tarjeta en un **Home Assistant real con un navegador** (nuevo conjunto de pruebas de extremo a extremo en `tests/e2e`, que corre en la CI). Encontró y corrige:
+- **Tarjeta en instalaciones nuevas:** buscaba las entidades con nombres que solo existen en instalaciones antiguas (`..._comidas_hoy`, `..._estado_eni`); en una instalación nueva mostraba «no se han encontrado entidades». Ahora acepta ambos.
+- **Carga de la tarjeta:** se registra como **recurso de Lovelace** (como hace HACS). La inyección anterior (`add_extra_js_url`) ejecutaba el script pero el elemento se perdía en un Home Assistant reciente y la tarjeta salía como «Error de configuración». Se mantiene como alternativa para paneles en modo YAML.
+- Lectura de `manifest.json` dentro del bucle de eventos (bloqueo avisado por Home Assistant).
+- El botón «Actualizar ahora» quedaba no disponible justo cuando DietoPro falla.
+- La tarjeta escribe un mensaje en la consola del navegador al cargar (o con el error si falla).
+- README en inglés (`README.en.md`) y aviso de que es una integración no oficial. 146 tests unitarios + 21 de extremo a extremo.
+
 ## 0.31.0
 - `medicion_abierta` y `registrar_medicion`: registrar una medición (opcional, manual; botón de la tarjeta solo con `show_measurement`).
 - `enviar_archivo_chat` y botón «Adjuntar foto o documento» en la tarjeta.

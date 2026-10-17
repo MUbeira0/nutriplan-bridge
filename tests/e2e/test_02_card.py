@@ -199,6 +199,7 @@ def test_chat_attachment_goes_through_the_upload_endpoint(page, fake, tmp_path):
     img.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
     fake.state.requests.clear()
     page.locator("nutriplan-bridge-card .chat-file").set_input_files(str(img))
+    page.locator("nutriplan-bridge-card .chat-panel .action-status", has_text="Enviado: comida.jpg").wait_for(timeout=45000)
     deadline = time.time() + 30
     while time.time() < deadline and not fake.state.calls("POST", "/api/paciente/chat/images"):
         time.sleep(0.3)
@@ -209,5 +210,5 @@ def test_chat_attachment_goes_through_the_upload_endpoint(page, fake, tmp_path):
 
 
 def test_no_javascript_errors_from_the_card(page):
-    ours = [e for e in page.errors if "nutriplan" in e.lower()]
+    ours = [e for e in page.errors if "nutriplan" in e.lower() and (e.startswith("[error]") or e.startswith("pageerror"))]
     assert not ours, ours

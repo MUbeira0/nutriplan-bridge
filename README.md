@@ -1,5 +1,14 @@
 # Nutriplan Bridge for Home Assistant
 
+[English](README.en.md) · Español
+
+> **No oficial.** No está afiliada ni respaldada por DietoPro. Inicia sesión con *tu propia* cuenta de
+> paciente, igual que la app oficial, y usa la misma API; si DietoPro la cambia, Home Assistant lo
+> avisa en *Ajustes → Reparaciones*. Las acciones que **escriben** en tu cuenta (mensajes, citas,
+> cambiar platos, registrar medición…) se trazaron del código de la app y se probaron contra un
+> servidor simulado, no contra una cuenta real: compruébalas la primera vez en la app oficial.
+
+
 Integración personalizada de Home Assistant (`custom_components/nutriplan_bridge`)
 para una app de pacientes de nutrición, con sensores de **plan/comidas del
 día** y **próxima cita/seguimientos**, más una tarjeta Lovelace
@@ -158,6 +167,14 @@ Y estas acciones (Herramientas de desarrollo → Acciones, o en automatizaciones
   falla, no es cosa de esta integración.
   Los errores salen cortos en la tarjeta; el detalle técnico completo
   queda en el registro de Home Assistant (Ajustes → Sistema → Registros).
+
+## Novedades 0.32
+
+- **Probado en un Home Assistant real, con navegador** (`tests/e2e`, también en la CI). Corrige cuatro
+  fallos que solo salen así: la tarjeta no encontraba las entidades en una instalación **nueva**, la
+  tarjeta no se cargaba en un Home Assistant reciente (ahora se registra como *recurso de Lovelace*,
+  visible en Ajustes → Paneles → Recursos), una lectura de archivo que bloqueaba el arranque y el
+  botón «Actualizar ahora» inutilizado durante una caída de DietoPro.
 
 ## Novedades 0.31
 
