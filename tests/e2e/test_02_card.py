@@ -87,6 +87,14 @@ def page(ha, entry):
             )
             import requests
 
+            info["browserSawScript"] = pg.evaluate(
+                """() => ({
+                    fetched: performance.getEntriesByType('resource').filter(r => r.name.includes('nutriplan')).map(r => [r.name, r.responseStatus, r.initiatorType]),
+                    inline: [...document.scripts].filter(s => (s.textContent || '').includes('nutriplan')).map(s => s.textContent.slice(0, 160)),
+                    scriptCount: document.scripts.length,
+                    html: document.documentElement.outerHTML.slice(0, 400),
+                })"""
+            )
             index = requests.get(f"{BASE}/nutriplan-e2e/nutri", timeout=20).text
             info["indexMentionsCardScript"] = "nutriplan_bridge_files" in index
             info["indexSnippet"] = index[max(0, index.find("nutriplan_bridge_files") - 200): index.find("nutriplan_bridge_files") + 200] if info["indexMentionsCardScript"] else index[:600]
